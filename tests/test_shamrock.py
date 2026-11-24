@@ -40,10 +40,9 @@ def test_fast_reader_matches_shamrock(scene):
     s = rd.read_sinks(DUMP)
     alive = s["mass"] > 0
     sk = scene.sinks
-    ids = np.concatenate([sk["star_id"], sk["core_id"]])
-    np.testing.assert_array_equal(np.sort(ids), np.flatnonzero(alive))
-    np.testing.assert_allclose(s["pos"][sk["star_id"]], sk["star_pos"], rtol=1e-12)
-    np.testing.assert_allclose(s["racc"][sk["core_id"]], sk["core_racc"], rtol=1e-12)
+    np.testing.assert_array_equal(sk["id"], np.flatnonzero(alive))
+    np.testing.assert_allclose(s["pos"][sk["id"]], sk["pos"], rtol=1e-12)
+    np.testing.assert_allclose(s["racc"][sk["id"]], sk["racc"], rtol=1e-12)
     g = rd.read_gas(DUMP)
     assert g["alive"].sum() == scene.npart
 
@@ -53,7 +52,7 @@ def test_frame_render(scene):
     from plouf.path.campath import DEFAULT_LOOK
     from plouf.render.backend import FrameRenderer
 
-    c = np.median(scene.sinks["star_pos"], axis=0) if len(scene.sinks["star_pos"]) else np.zeros(3)
+    c = np.median(scene.sinks["pos"], axis=0) if len(scene.sinks["pos"]) else np.zeros(3)
     st = CamState(pos=c + [0, -30, 8], target=c, up=[0, 0, 1])
     tm = {}
     img = FrameRenderer(scene).render(st, 160, 90, dict(DEFAULT_LOOK), tm)
@@ -117,3 +116,21 @@ def test_stereo_movie_render(tmp_path):
     cmd = [sys.executable, "-m", "plouf.render_movie", str(f), "--out", str(out), "--scale", "0.05", "--frames", "1:3", "--stereo"]
     subprocess.run(cmd, check=True, capture_output=True, env=dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path)))
     assert sorted(os.listdir(out)) == [f"frame_{j:05d}.png" for j in (2, 3, 4, 5)]
+
+
+def test_numpy_renderer_matches_shamrock(scene):
+    """The fallback renderer (render/sph.py) gives the same column density maps as shamrock."""
+    from plouf.path.camera import CamState
+    from plouf.render.sph import NumpyScene
+
+    ns = NumpyScene()
+    ns.load(DUMP)
+    c = np.median(ns.gas["pos"], axis=0)
+    R = np.percentile(np.linalg.norm(ns.gas["pos"] - c, axis=1), 90)
+    for offset in ([0, -2.6, 0.9], [0.3, -0.4, 0.1]):  # the whole cloud, then from inside it
+        st = CamState(pos=c + np.array(offset) * R, target=c, up=[0, 0, 1])
+        a, b = scene.column(st, 160, 90), ns.column(st, 160, 90)
+        ok = (a > 1e-3 * a.max()) & (b > 0)
+        assert ok.mean() > 0.2
+        r = np.log10(b[ok] / a[ok])
+        assert abs(np.median(r)) < 0.02 and np.percentile(np.abs(r), 90) < 0.1  # dex

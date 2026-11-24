@@ -37,20 +37,24 @@ def test_sink_not_yet_formed_holds_its_first_position(tracks):
     np.testing.assert_allclose(tracks.position(3, 1.0), sink_pos(3, 2), atol=1e-9)
 
 
+CLUSTER = {"sinks": "cluster"}
+
+
 def test_sinks_at_splits_stars_and_cores(tracks):
-    sk = tracks.sinks_at(1.2)  # alive sinks of the nearest dump (1), at their position at 1.2
+    sk = tracks.sinks_at(1.2, CLUSTER)  # alive sinks of the nearest dump (1), at their position at 1.2
     np.testing.assert_array_equal(sk["star_id"], [0, 1])
     np.testing.assert_array_equal(sk["core_id"], [2])
     np.testing.assert_allclose(sk["star_pos"], [sink_pos(0, 1.2), sink_pos(1, 1.2)], atol=1e-9)
     np.testing.assert_allclose(sk["core_pos"], [sink_pos(2, 1.2)], atol=1e-9)
     np.testing.assert_allclose(sk["star_mass"], SINK_M[:2])
     np.testing.assert_allclose(sk["core_racc"], [0.02])
-    np.testing.assert_array_equal(tracks.sinks_at(3)["star_id"], [0, 1, 3])
+    np.testing.assert_array_equal(tracks.sinks_at(3, CLUSTER)["star_id"], [0, 1, 3])
 
 
 def test_describe(tracks):
-    assert tracks.describe(0, 1) == "star #0 · 8 M☉"
-    assert tracks.describe(2, 1) == "core #2 · 50 M☉"
+    assert tracks.describe(0, 1, CLUSTER) == "star #0 · 8 M☉"
+    assert tracks.describe(2, 1, CLUSTER) == "core #2 · 50 M☉"
+    assert tracks.describe(2, 1) == "sink #2 · 50 M☉"  # default: plain markers
     assert tracks.describe(3, 0) == "sink #3 (forms at dump 2)"
 
 
@@ -61,3 +65,15 @@ def test_cache_roundtrip(sim):
     again = SinkTracks.load(cp)  # float32 cache
     np.testing.assert_allclose(again.track(0, [0.5, 3.2]), tr.track(0, [0.5, 3.2]), rtol=1e-6)
     assert again.units == pytest.approx(tr.units)
+
+
+def test_sink_modes(tracks):
+    """How sinks are drawn: plain markers (default), cluster (stars / cores by accretion radius), all stars, hidden."""
+    n = lambda sk: (list(sk["star_id"]), list(sk["core_id"]))  # noqa: E731
+    assert n(tracks.sinks_at(3)) == ([], [0, 1, 2, 3])  # markers: every sink a disc
+    assert n(tracks.sinks_at(3, {"sinks": "cluster"})) == ([0, 1, 3], [2])
+    assert n(tracks.sinks_at(3, {"sinks": "cluster", "star_max_racc_pc": 1e-5})) == ([], [0, 1, 2, 3])  # threshold
+    assert n(tracks.sinks_at(3, {"sinks": "stars"})) == ([0, 1, 2, 3], [])
+    assert n(tracks.sinks_at(3, {"sinks": "hidden"})) == ([], [])
+    sk = tracks.sinks_at(3, {"sinks": "stars"})
+    np.testing.assert_allclose(sk["star_mass"], [8, 1, 50, 0.5])

@@ -4,7 +4,8 @@
 # plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
-Render all the frames of a plouf camera path with shamrock.
+Render all the frames of a plouf camera path with shamrock (or the numpy SPH renderer
+when shamrock is not installed, see --backend).
 
     ./plouf render campath.json --out frames/ [--frames 0:300] [--scale 0.5] [--mp4 movie.mp4]
 
@@ -25,7 +26,7 @@ import time
 from .data.sinktracks import SinkTracks
 from .path.camera import stereo_eyes
 from .path.campath import CameraPath
-from .render.backend import FrameRenderer, SimScene, init_shamrock
+from .render.backend import BACKENDS, FrameRenderer, make_scene
 from .render.compose import save_png
 from .render.stars import star_exposure
 
@@ -37,6 +38,8 @@ def main():
     ap.add_argument("--frames", default=None, help="frame range a:b (python slice, b excluded)")
     ap.add_argument("--scale", type=float, default=1.0, help="resolution scale, e.g. 0.5 for a draft")
     ap.add_argument("--sycl", default="0:0", help="shamrock sycl config")
+    ap.add_argument("--backend", choices=BACKENDS, default="auto",
+                    help="renderer: shamrock, numpy (no shamrock needed, slower), auto: shamrock if installed")  # fmt: skip
     ap.add_argument("--mp4", default=None, help="encode the frames into this movie with ffmpeg at the end")
     ap.add_argument("--crf", type=int, default=18, help="x264 quality for --mp4 (lower is better)")
     ap.add_argument("--skip-existing", action="store_true")
@@ -65,12 +68,13 @@ def main():
         b = min(int(sb), n) if sb else n
     frames = range(a, b)
 
-    init_shamrock(args.sycl)
-    scene = SimScene()
+    fmt = args.format or path.format
+    scene = make_scene(args.backend, args.sycl, fmt)
+    print(f"renderer: {scene.name}", flush=True)
     renderer = FrameRenderer(scene)
     # sink trajectories: cameras following a sink, sinks drawn between dumps
     t0 = time.perf_counter()
-    tracks = SinkTracks.build(path.dumps, fmt=args.format or path.format)
+    tracks = SinkTracks.build(path.dumps, fmt=fmt)
     path.set_tracks(tracks)
     renderer.tracks = tracks
     print(f"sink tracks: {tracks.nsink} sinks in {tracks.ndump} dumps ({time.perf_counter() - t0:.1f} s)", flush=True)
@@ -87,7 +91,7 @@ def main():
             continue
         t0 = time.perf_counter()
         st = path.evaluate(path.frame_time(i))
-        if scene.load(path.dump_path(st)):
+        if scene.load(path.dump_path(st), fmt):
             print(f"loaded {scene.path} (t = {scene.time_myr:.3f} Myr, {scene.load_time:.1f} s)", flush=True)
         timings = {}
         exposure = star_exposure(path, path.frame_time(i), renderer.starlight, nx, ny)  # of the mono camera: same for both eyes

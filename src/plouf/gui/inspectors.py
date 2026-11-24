@@ -11,6 +11,8 @@ import numpy as np
 from PyQt6 import QtWidgets
 from PyQt6.QtCore import Qt
 
+from ..constants import SINK_MODES
+
 RESOLUTIONS = {
     "1280x720 (720p)": (1280, 720),
     "1920x1080 (1080p)": (1920, 1080),
@@ -22,6 +24,143 @@ RESOLUTIONS = {
 }
 PREVIEW_WIDTHS = [160, 240, 320, 480, 640, 960,1080]
 CMAPS = ["inferno", "magma", "viridis", "plasma", "gist_heat", "afmhot", "cividis", "bone", "gray", "cubehelix", "twilight_shifted"]
+
+
+SINK_TIPS = (
+    "how sink particles are drawn:\n"
+    "plain markers: every sink a disc of its accretion radius (at least a few px)\n"
+    "cluster: sinks with an accretion radius below the threshold are stars (photometry from their mass),\n"
+    "    the others cores (discs of their accretion radius)\n"
+    "all stars: every sink is a star\n"
+    "hidden: not drawn (still selectable and followable)"
+)
+STAR_MODES = ("cluster", "stars")  # sink modes with stars (photometry, PSF, exposure)
+DISC_MODES = ("cluster", "markers")  # sink modes with discs (cores or markers)
+
+
+def has_stars(look):
+    return look["sinks"] in STAR_MODES
+
+
+class SinkLook(QtWidgets.QWidget):
+    """
+    How sinks are drawn, in a look (shared by the movie panel and the view mode panel):
+    the sink mode and only the controls that mode uses (stars, cores or markers).
+    on_edit() is called after any change; write(look) puts the values in a look dict.
+    """
+
+    def __init__(self, on_edit):
+        super().__init__()
+        self._updating = False
+        self.on_edit = on_edit
+        form = self.form = QtWidgets.QFormLayout(self)
+        form.setContentsMargins(0, 0, 0, 0)
+        self.mode = QtWidgets.QComboBox()
+        for mode, name in SINK_MODES.items():
+            self.mode.addItem(name, mode)
+        self.mode.setToolTip(SINK_TIPS)
+        self.mode.currentIndexChanged.connect(self._edited)
+        self.thr = dspin(1e-5, 10, 4, 0.005, " pc")
+        self.thr.setToolTip("sinks with an accretion radius below this are stars, the others cores")
+        self.checks = {}
+        star_row = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(star_row)
+        grid.setContentsMargins(0, 0, 0, 0)
+        for i, (key, text, tip) in enumerate((
+            ("show_stars", "stars", "draw the stars"),
+            ("star_psf", "PSF", "off: stars drawn as dots, as in the instant proxy view, without the PSF glow"),
+            ("star_spikes", "spikes", "diffraction spikes in the PSF"),
+            ("auto_exposure", "auto exposure",
+             "star exposure follows the brightest stars in view (smoothed over 1 s); the exposure set is added to it"),
+        )):  # fmt: skip
+            c = QtWidgets.QCheckBox(text)
+            c.setToolTip(tip)
+            self.checks[key] = c
+            grid.addWidget(c, i // 2, i % 2)
+        self.star_row = star_row
+        self.psf = dspin(0.05, 20, 2, 0.1)
+        self.psf.setToolTip("size of the star PSF (1: core FWHM 1.6 px on a 1920 px frame)")
+        self.spike = dspin(-90, 90, 1, 5, "°")
+        self.spike.setWrapping(True)
+        self.spike.setToolTip("rotation of the diffraction spikes, counterclockwise on screen (0: along the frame edges)")
+        self.glow = dspin(0.0, 1.0, 2, 0.05)
+        self.glow.setToolTip(
+            "glow of the stars brighter than white: 1 = physical flux (a close star's halo and spikes grow as 1/d^2), "
+            "lower = they grow slower (brightness above white x drawn as x^value); stars below white are unchanged"
+        )
+        self.checks["show_cores"] = self.discs = QtWidgets.QCheckBox()
+        self.radius = dspin(0.0, 10, 4, 0.005)
+        self.radius.setSpecialValueText("physical (r_acc)")  # 0 = sink accretion radius
+        self.radius.setToolTip("disc radius in code length units; 0 = the sinks' accretion radius from the dump")
+        drow = QtWidgets.QHBoxLayout()
+        drow.addWidget(self.discs)
+        drow.addWidget(self.radius, 1)
+        self.disc_row = drow
+        self.marker_size = dspin(0.5, 50, 1, 0.5, " px")
+        self.marker_size.setToolTip("smallest marker radius, px on a 1080 px tall frame (tiny accretion radii stay visible)")
+        for w in self.checks.values():
+            w.toggled.connect(self._edited)
+        for w in (self.thr, self.psf, self.spike, self.glow, self.radius, self.marker_size):
+            w.valueChanged.connect(self._edited)
+        form.addRow("sinks", self.mode)
+        form.addRow("star if r_acc <", self.thr)
+        form.addRow(star_row)
+        form.addRow("star PSF scale", self.psf)
+        form.addRow("spike angle", self.spike)
+        form.addRow("bright star glow γ", self.glow)
+        form.addRow("cores", drow)
+        form.addRow("smallest marker", self.marker_size)
+
+    def set_look(self, look):
+        self._updating = True
+        self.mode.setCurrentIndex(max(0, self.mode.findData(look["sinks"])))
+        self.thr.setValue(look["star_max_racc_pc"])
+        for k, c in self.checks.items():
+            c.setChecked(bool(look[k]))
+        self.psf.setValue(look["psf_scale"])
+        self.spike.setValue(look["spike_angle"])
+        self.glow.setValue(look["glow_gamma"])
+        self.radius.setValue(look["core_radius"] or 0.0)
+        self.marker_size.setValue(look["marker_size"])
+        self._updating = False
+        self._show(look)
+
+    def write(self, look):
+        look["sinks"] = self.mode.currentData()
+        look["star_max_racc_pc"] = self.thr.value()
+        for k, c in self.checks.items():
+            look[k] = c.isChecked()
+        look["psf_scale"] = self.psf.value()
+        look["spike_angle"] = self.spike.value()
+        look["glow_gamma"] = self.glow.value()
+        look["core_radius"] = self.radius.value() or None
+        look["marker_size"] = self.marker_size.value()
+
+    def _show(self, look):
+        """Only the controls of the sink mode, enabled when they have an effect."""
+        mode = look["sinks"]
+        stars, discs = mode in STAR_MODES, mode in DISC_MODES
+        form = self.form
+        form.setRowVisible(self.thr, mode == "cluster")
+        for w in (self.star_row, self.psf, self.spike, self.glow):
+            form.setRowVisible(w, stars)
+        form.setRowVisible(self.disc_row, discs)
+        form.setRowVisible(self.marker_size, mode == "markers")
+        name = "markers" if mode == "markers" else "cores"
+        self.discs.setText(f"draw {name}")
+        form.labelForField(self.disc_row).setText(f"{name[:-1]} radius")
+        psf = look["star_psf"]
+        self.checks["star_spikes"].setEnabled(psf)
+        self.spike.setEnabled(psf and look["star_spikes"])
+        self.psf.setEnabled(psf)
+        self.glow.setEnabled(psf)
+        self.radius.setEnabled(look["show_cores"])
+        self.marker_size.setEnabled(look["show_cores"])
+
+    def _edited(self):
+        if self._updating:
+            return
+        self.on_edit()
 
 
 def dspin(lo, hi, dec=3, step=0.1, suffix=""):
@@ -39,7 +178,7 @@ class CameraInspector(QtWidgets.QGroupBox):
     def __init__(self, ed):
         super().__init__("Camera")
         self.ed = ed
-        lay = QtWidgets.QFormLayout(self)
+        lay = self.form = QtWidgets.QFormLayout(self)
         lay.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.header = QtWidgets.QLabel()
         lay.addRow(self.header)
@@ -162,6 +301,8 @@ class CameraInspector(QtWidgets.QGroupBox):
         self.ext.setValue(st.extinction)
         self.ease.setChecked(st.ease)
         self._updating = False
+        for w in (self.expo, self.ext):  # per-key star settings: only with stars
+            self.form.setRowVisible(w, has_stars(ed.path.look))
         # follow row
         lines = []
         if st.follow is not None:
@@ -223,39 +364,26 @@ class MovieInspector(QtWidgets.QGroupBox):
         self.prev.addItems([str(w) for w in PREVIEW_WIDTHS])
         self.cmap = QtWidgets.QComboBox()
         self.cmap.addItems(CMAPS)
-        self.core_r = dspin(0.0, 10, 4, 0.005)
-        self.core_r.setSpecialValueText("physical (r_acc)")  # 0 = sink accretion radius
-        self.core_r.setToolTip("core disc radius in code length units; 0 = the sinks' accretion radius from the dump")
-        self.psf = dspin(0.05, 20, 2, 0.1)
-        self.spike = dspin(-90, 90, 1, 5, "°")
-        self.spike.setWrapping(True)
-        self.spike.setToolTip("rotation of the diffraction spikes, counterclockwise on screen (0: along the frame edges)")
-        self.glow = dspin(0.0, 1.0, 2, 0.05)
-        self.glow.setToolTip(
-            "glow of the stars brighter than white: 1 = physical flux (a close star's halo and spikes grow as 1/d^2), "
-            "lower = they grow slower (brightness above white x drawn as x^value); stars below white are unchanged"
-        )
         self.label = dspin(4, 400, 0, 2, " px")
         self.label.setToolTip("time label height in pixels of a 1080 px tall frame (scaled with the output height)")
+        self.sink_look = SinkLook(self._edited)
+        # shortcuts to the sink controls
+        sl = self.sink_look
+        self.sinks, self.star_racc, self.core_r = sl.mode, sl.thr, sl.radius
+        self.psf, self.spike, self.glow = sl.psf, sl.spike, sl.glow
         self.checks = {}
-        crow = QtWidgets.QGridLayout()
-        for i, (key, text) in enumerate(
-            (("show_gas", "gas"), ("show_stars", "stars"), ("show_cores", "cores"), ("time_label", "time label"),
-             ("star_psf", "star PSF"), ("star_spikes", "spikes"), ("auto_exposure", "auto exposure"))
-        ):
+        crow = QtWidgets.QHBoxLayout()
+        for key, text in (("show_gas", "gas"), ("time_label", "time label")):
             c = QtWidgets.QCheckBox(text)
             c.toggled.connect(self._edited)
             self.checks[key] = c
-            crow.addWidget(c, i // 3, i % 3)
+            crow.addWidget(c)
         self.grid = QtWidgets.QCheckBox("thirds grid")
         self.grid.toggled.connect(self._grid)
-        n = len(self.checks)
-        crow.addWidget(self.grid, n // 3, n % 3)
-        self.checks["star_psf"].setToolTip("off: stars drawn as dots, as in the instant proxy view, without the PSF glow")
-        self.checks["auto_exposure"].setToolTip(
-            "star exposure follows the brightest stars in view (smoothed over 1 s); the key exposure is added to it"
-        )
-        for w in (self.duration, self.fps, self.core_r, self.psf, self.spike, self.glow, self.label):
+        crow.addWidget(self.grid)
+        crow.addStretch(1)
+        self.checks.update(sl.checks)
+        for w in (self.duration, self.fps, self.label):
             w.valueChanged.connect(self._edited)
         for w in (self.res, self.prev, self.cmap):
             w.currentIndexChanged.connect(self._edited)
@@ -264,12 +392,9 @@ class MovieInspector(QtWidgets.QGroupBox):
         lay.addRow("output", self.res)
         lay.addRow("preview width", self.prev)
         lay.addRow("colormap", self.cmap)
-        lay.addRow("core radius", self.core_r)
-        lay.addRow("star PSF scale", self.psf)
-        lay.addRow("spike angle", self.spike)
-        lay.addRow("bright star glow γ", self.glow)
         lay.addRow("time label size", self.label)
         lay.addRow(crow)
+        lay.addRow(sl)
         self._updating = False
 
     def _grid(self, on):
@@ -294,16 +419,12 @@ class MovieInspector(QtWidgets.QGroupBox):
         if path.look["cmap"] not in CMAPS:
             self.cmap.addItem(path.look["cmap"])
         self.cmap.setCurrentText(path.look["cmap"])
-        self.core_r.setValue(path.look["core_radius"] or 0.0)
-        self.psf.setValue(path.look["psf_scale"])
-        self.spike.setValue(path.look["spike_angle"])
         self.label.setValue(path.look["label_size"])
-        self.glow.setValue(path.look["glow_gamma"])
-        for k, c in self.checks.items():
-            c.setChecked(bool(path.look[k]))
-        self.spike.setEnabled(path.look["star_psf"] and path.look["star_spikes"])
+        for k in ("show_gas", "time_label"):
+            self.checks[k].setChecked(bool(path.look[k]))
         self.label.setEnabled(path.look["time_label"])
-        self.glow.setEnabled(path.look["star_psf"])
+        self.sink_look.set_look(path.look)
+        self.core_r.setSpecialValueText(ed.disc_radius_hint(path.look))
         self._updating = False
 
     def _edited(self):
@@ -316,13 +437,13 @@ class MovieInspector(QtWidgets.QGroupBox):
         path.resolution = RESOLUTIONS[self.res.currentText()]
         ed.preview_width = int(self.prev.currentText())
         path.look["cmap"] = self.cmap.currentText()
-        path.look["core_radius"] = self.core_r.value() or None
-        path.look["psf_scale"] = self.psf.value()
-        path.look["spike_angle"] = self.spike.value()
         path.look["label_size"] = self.label.value()
-        path.look["glow_gamma"] = self.glow.value()
-        for k, c in self.checks.items():
-            path.look[k] = c.isChecked()
+        for k in ("show_gas", "time_label"):
+            path.look[k] = self.checks[k].isChecked()
+        self.sink_look.write(path.look)
+        self.sink_look.set_look(path.look)  # the controls of the (new) sink mode
+        self.core_r.setSpecialValueText(ed.disc_radius_hint(path.look))
+        self.label.setEnabled(path.look["time_label"])
         path.invalidate()
         ed.path_edited()
         ed.commit()

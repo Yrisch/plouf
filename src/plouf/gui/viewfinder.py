@@ -3,7 +3,12 @@
 # SPDX-License-Identifier: CECILL-2.1
 # plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
-"""Viewfinder: what the camera sees (instant particle proxy, then the shamrock render)."""
+"""
+Viewfinder: what the camera sees (instant particle proxy, then the real render).
+
+The view mode's canvas (gui/viewmode.py) is a Viewfinder too: its ``ed`` is then the
+view mode, which provides the same small interface (live, look, sample, preview, sinks...).
+"""
 
 import json
 import math
@@ -11,13 +16,18 @@ import os
 
 import numpy as np
 from PyQt6 import QtWidgets
-from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtCore import QPointF, Qt, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPen
 
 from ..path.camera import ZNEAR, normalize, project
-from ..render.compose import compose, splat_column
+from ..render.compose import compose, splat_column, splat_sph
 from .keymaps import KEYMAPS, key_char, keymap_hint
 from .qtutil import draw_dots, fit_rect, np_to_qimage
+
+
+PROXY_PIXELS = 1920 * 1080  # the proxy at rest: the view's resolution (device pixels), up to this
+PROXY_FAST_PIXELS = 400_000  # while the view changes (moving, playing): coarser, and half of the sample
+PROXY_SETTLE_MS = 200  # the view unchanged this long: the proxy is redrawn at rest resolution
 
 
 class Viewfinder(QtWidgets.QWidget):
@@ -30,19 +40,56 @@ class Viewfinder(QtWidgets.QWidget):
         self._drag = None
         self._press = None
         self._proxy = (None, None)
+        self._view = None  # what the proxy shows, to tell a changing view from a still one
+        self._cancelled = set()  # render requests already cancelled
+        self._fast = False
+        self._settle = QTimer(self, singleShot=True, interval=PROXY_SETTLE_MS)
+        self._settle.timeout.connect(self._settled)
         self.show_grid = False
 
-    def proxy_image(self):
+    def _settled(self):
+        self._fast = False
+        self.update()
+
+    def look(self):
+        return self.ed.path.look
+
+    def proxy_size(self, rect, fast):
+        """Proxy image size for a view rect: its device pixels, within the pixel budget."""
+        dpr = self.devicePixelRatioF()
+        w, h = max(rect.width() * dpr, 1.0), max(rect.height() * dpr, 1.0)
+        k = min(1.0, math.sqrt((PROXY_FAST_PIXELS if fast else PROXY_PIXELS) / (w * h)))
+        return max(16, int(w * k)), max(9, int(h * k))
+
+    def proxy_image(self, rect=None):
+        """
+        The instant view of the particle sample. While the view changes it is drawn coarser
+        and from half of the sample; PROXY_SETTLE_MS after the last change, at the view's
+        resolution (with the sample's smoothing lengths: sharp where the gas is dense).
+        """
         ed = self.ed
         if ed.sample is None:
             return None
-        nx, ny = ed.preview_size(cap=480)
+        if rect is None:
+            rect = fit_rect(self.width(), self.height(), ed.aspect())
         st = ed.live
-        key = (json.dumps(st.to_dict()), nx, ny, ed.sample_id, json.dumps(ed.path.look, sort_keys=True), ed.playing)
+        view = (json.dumps(st.to_dict()), ed.sample_id, json.dumps(self.look(), sort_keys=True))
+        if view != self._view:
+            if self._view is not None:
+                self._fast = True
+                self._settle.start()
+            self._view = view
+        fast = self._fast or ed.playing
+        nx, ny = self.proxy_size(rect, fast)
+        key = (view, nx, ny, fast)
         if self._proxy[0] != key:
-            k = 2 if ed.playing else 1  # half of the sample while playing, to keep up with the frame rate
-            sig = splat_column(ed.sample[::k], ed.weight * k, st, nx, ny)
-            rgb = compose(sig, st, ed.path.look, ed.display_sinks(), None, None)
+            k = 2 if fast else 1
+            h = getattr(ed, "sample_h", None)
+            if h is not None:  # half of the sample: twice the mass, kernels 2^(1/3) wider
+                sig = splat_sph(ed.sample[::k], h[::k] * k ** (1 / 3), ed.weight * k, st, nx, ny)
+            else:  # a sample without smoothing lengths (from the render process): plain splat
+                sig = splat_column(ed.sample[::k], ed.weight * k, st, nx, ny, smooth=max(0.7, nx / 640))
+            rgb = compose(sig, st, self.look(), ed.display_sinks(), None, None)
             self._proxy = (key, np_to_qimage(rgb))
         return self._proxy[1]
 
@@ -54,23 +101,42 @@ class Viewfinder(QtWidgets.QWidget):
         p.fillRect(self.rect(), QColor(30, 30, 34))
         rect = fit_rect(self.width(), self.height(), ed.aspect())
         p.fillRect(rect, QColor(0, 0, 0))
+        self._drop_stale_render()
+        mode = self._paint_image(p, rect)
+        self._paint_marks(p, rect)
+        self._paint_hud(p, rect, mode)
 
-        refined = ed.preview_valid()
-        if refined:
+    def _drop_stale_render(self):
+        """The render in progress is for a view that is gone (moved, next dump, playing): cancel it."""
+        ed = self.ed
+        if not ed.pending or ed.backend is None:
+            return
+        rid = next(iter(ed.pending))
+        if rid not in self._cancelled and ed.look_key() not in ed.pending.values():
+            self._cancelled.add(rid)
+            ed.backend.cancel()
+
+    def _paint_image(self, p, rect):
+        """The real render if it is up to date, else the proxy. Returns the HUD text of what is shown."""
+        ed = self.ed
+        if ed.preview_valid():
             p.drawImage(rect, ed.preview_img)
-            mode = f"SHAMROCK {ed.preview_img.width()}×{ed.preview_img.height()} · {ed.preview_info.get('total', 0):.2f} s"
-        else:
-            img = self.proxy_image()
-            if img is not None:
-                p.drawImage(rect, img)
-            sinks = ed.display_sinks()
-            if ed.path.look.get("show_stars", True) and sinks is not None and len(sinks["star_pos"]):
-                self._proxy_stars(p, rect)
-            mode = "PROXY" + ("  ·  rendering…" if ed.backend and ed.backend.busy else "")
-            if ed.proxy_status():
-                mode += "  ·  " + ed.proxy_status()
+            name = ed.preview_info.get("backend", "render").upper()
+            return f"{name} {ed.preview_img.width()}×{ed.preview_img.height()} · {ed.preview_info.get('total', 0):.2f} s"
+        img = self.proxy_image(rect)
+        if img is not None:
+            p.drawImage(rect, img)
+        sinks = ed.display_sinks()
+        if self.look().get("show_stars", True) and sinks is not None and len(sinks["star_pos"]):
+            self._proxy_stars(p, rect)
+        mode = "PROXY" + ("  ·  rendering…" if ed.backend and ed.backend.busy else "")
+        if ed.proxy_status():
+            mode += "  ·  " + ed.proxy_status()
+        return mode
 
-        # selected / followed sink (editor only, never in the renders)
+    def _paint_marks(self, p, rect):
+        """Selected / followed sink rings and the thirds grid (editor only, never in the renders)."""
+        ed = self.ed
         for sink, col, rad in ((ed.selected, QColor(255, 255, 255, 200), 8.0), (ed.live.follow, QColor(80, 230, 230), 11.0)):
             pt = ed.sink_position(sink)
             if pt is None:
@@ -90,7 +156,8 @@ class Viewfinder(QtWidgets.QWidget):
             p.setPen(QPen(QColor(255, 255, 255, 40), 1, Qt.PenStyle.DashLine))
             p.drawRect(rect.adjusted(rect.width() * 0.05, rect.height() * 0.05, -rect.width() * 0.05, -rect.height() * 0.05))
 
-        # HUD
+    def _paint_hud(self, p, rect, mode):
+        ed = self.ed
         p.setPen(QColor(220, 220, 220))
         f = p.font()
         f.setPointSizeF(9)

@@ -360,7 +360,7 @@ def star_exposure(path, t, starlight, nx, ny, window=1.0, samples=11):
     vals, ws = [], []
     for ti, wi in zip(ts, wts):
         si = path.evaluate(ti)
-        sk = tr.sinks_at(si.dump)
+        sk = tr.sinks_at(si.dump, path.look)
         if not len(sk["star_id"]):
             continue
         lum, _ = starlight.luminosities(sk["star_mass"])

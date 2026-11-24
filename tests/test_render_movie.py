@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: CECILL-2.1
 # plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
-"""The batch renderer's frame bookkeeping (mono and stereo), with a stub in place of shamrock."""
+"""The batch renderer's frame bookkeeping (mono and stereo), with a stub in place of the renderer."""
 
 import os
 import sys
@@ -17,9 +17,9 @@ from plouf.path.campath import CameraPath, Keyframe
 
 
 class StubScene:
-    path, time_myr, load_time = None, 0.0, 0.0
+    name, path, time_myr, load_time = "stub", None, 0.0, 0.0
 
-    def load(self, path):
+    def load(self, path, fmt=None):
         new, self.path = path != self.path, path
         return new
 
@@ -42,8 +42,7 @@ class StubRenderer:
 
 @pytest.fixture
 def run(sim, tmp_path, monkeypatch):
-    monkeypatch.setattr(render_movie, "init_shamrock", lambda cfg: None)
-    monkeypatch.setattr(render_movie, "SimScene", StubScene)
+    monkeypatch.setattr(render_movie, "make_scene", lambda backend, sycl, fmt: StubScene())
     monkeypatch.setattr(render_movie, "FrameRenderer", StubRenderer)
     StubRenderer.calls = []
     p = CameraPath(keyframes=[Keyframe(0, CamState(pos=[0, -3, 1], target=[0, 0, 0], up=[0, 0, 1], dump=0, exposure=0.5)),

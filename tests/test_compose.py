@@ -11,7 +11,8 @@ import pytest
 from plouf.path.camera import CamState, pixel_size
 from plouf.render.compose import compose, core_radius, draw_label, gas_rgb, lut, splat_column
 
-LOOK = {"cmap": "inferno", "show_gas": True, "show_cores": True, "core_radius": None, "core_color": [1.0, 0.27, 0.0]}
+LOOK = {"cmap": "inferno", "show_gas": True, "show_cores": True, "core_radius": None, "core_color": [1.0, 0.27, 0.0],
+        "sinks": "cluster"}
 
 
 def view():
@@ -79,3 +80,44 @@ def test_label_size_is_a_parameter_scaled_with_the_frame_height():
     assert h > 20  # a scalable font, not the 11 px bitmap fallback
     assert text_height(1080, 72) == pytest.approx(2 * h, rel=0.1)
     assert text_height(540, 36) == pytest.approx(h / 2, rel=0.1)
+
+
+def test_markers_have_a_minimum_size_and_their_colour():
+    st = view()
+    sigma = np.full((108, 192), 1e-6)  # no gas visible
+    sinks = {"core_pos": np.array([[0.0, 0.0, 0.0]]), "core_racc": np.array([1e-6])}  # a tiny accretion radius
+    look = dict(LOOK, sinks="markers", marker_size=10.0, marker_color=[0.0, 1.0, 0.0])
+    out = compose(sigma, st, look, sinks, None, None)
+    green = (out[..., 1] > 200) & (out[..., 0] < 50)
+    assert 1 <= green.sum() <= 8  # 10 px radius on a 1080 px frame: 1 px here, still visible
+    big = compose(np.full((1080, 1920), 1e-6), st, look, sinks, None, None)
+    ys, xs = np.nonzero((big[..., 1] > 200) & (big[..., 0] < 50))
+    assert 9 <= (xs.max() - xs.min() + 1) / 2 <= 11
+
+
+def test_compose_without_star_layer_is_the_same_frame_as_with_the_float_path():
+    """The fast path of the instant views (uint8 colormap, discs blended in their box) changes no pixel."""
+    from plouf.render.compose import _quantize, draw_discs, gas_rgb, sink_discs
+
+    st = view()
+    rng = np.random.default_rng(0)
+    sigma = 10 ** rng.uniform(-1, 4, (90, 160))
+    sinks = {"core_pos": rng.normal(scale=0.5, size=(6, 3)), "core_racc": rng.uniform(0.01, 0.3, 6)}
+    for look in (LOOK, dict(LOOK, sinks="markers"), dict(LOOK, show_gas=False)):
+        ref = gas_rgb(sigma, st.clim, "inferno").astype(np.float64) if look["show_gas"] else np.zeros((90, 160, 3))
+        draw_discs(ref, *sink_discs(st, look, sinks, 160, 90))
+        np.testing.assert_array_equal(compose(sigma, st, look, sinks, None, None), _quantize(ref))
+
+
+def test_proxy_splat_with_smoothing_lengths():
+    """splat_sph: the column of the particles (mass kept), each as wide as its kernel on screen."""
+    from plouf.render.compose import SPLAT_SIGMA_H, splat_sph
+
+    st = view()
+    for h in (1e-4, 0.05, 0.4):  # below a pixel, a few pixels, tens of pixels (coarse grids)
+        img = splat_sph(np.zeros((1, 3)), np.array([h]), 2.0, st, 320, 180)
+        assert img.sum() * pixel_size(st, st.distance, 180) ** 2 == pytest.approx(2.0, rel=0.01)
+        sig_px = max(SPLAT_SIGMA_H * h / pixel_size(st, st.distance, 180), 0.7)
+        prof = img[90]
+        width = np.sqrt(np.sum(prof * (np.arange(320) + 0.5 - 160) ** 2) / prof.sum())
+        assert width == pytest.approx(np.sqrt(sig_px**2 + 1 / 12), rel=0.25)  # Gaussian of the kernel's width

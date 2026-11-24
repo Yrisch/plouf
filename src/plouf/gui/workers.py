@@ -4,7 +4,7 @@
 # plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
-Background work of the editor: the shamrock render process, the sink tracks reader.
+Background work of the editor: the render process (shamrock, or the numpy renderer), the sink tracks reader.
 Workers never touch widgets; they report through Qt signals to the GUI thread.
 """
 
@@ -49,12 +49,17 @@ class Backend(QtCore.QObject):
     frame = pyqtSignal(object)
     error = pyqtSignal(object)
     status = pyqtSignal(str)
+    cancelled = pyqtSignal(object)  # {"id"}: a render dropped because the view changed (cancel)
 
-    def __init__(self, sycl, sample_n):
+    def __init__(self, sycl, sample_n, renderer="auto"):
         super().__init__()
         ctx = mp.get_context("spawn")
         self.conn, child = ctx.Pipe()
-        self.proc = ctx.Process(target=backend.server_main, args=(child, sycl, sample_n), daemon=True)
+        self.generation = ctx.Value("i", 0)  # incremented by cancel(): renders asked before are dropped
+        self.proc = ctx.Process(
+            target=backend.server_main, args=(child, sycl, sample_n, renderer, self.generation), daemon=True
+        )
+        self.name = None  # renderer of the process once it is ready: "shamrock" or "numpy"
         self.proc.start()
         child.close()
         self.last_id = 0
@@ -64,7 +69,7 @@ class Backend(QtCore.QObject):
         self.timer.timeout.connect(self._poll)
         self.timer.start(15)
 
-    def request(self, state, dump, nx, ny, look, keep=False, exposure=None):
+    def request(self, state, dump, nx, ny, look, keep=False, exposure=None, fmt=None):
         self.last_id += 1
         self.conn.send(
             {
@@ -77,11 +82,18 @@ class Backend(QtCore.QObject):
                 "look": dict(look),
                 "keep": keep,
                 "exposure": exposure,
+                "format": fmt,
+                "gen": self.generation.value,
             }
         )
         if not keep:
             self.busy = True
         return self.last_id
+
+    def cancel(self):
+        """Drop the renders asked so far (not the exports): the view they were for is gone."""
+        with self.generation.get_lock():
+            self.generation.value += 1
 
     def send_tracks(self, path):
         try:
@@ -103,8 +115,14 @@ class Backend(QtCore.QObject):
                 elif t == "error":
                     self.busy = False
                     self.error.emit(msg)
+                elif t == "cancelled":
+                    if msg["id"] == self.last_id:
+                        self.busy = False
+                    self.cancelled.emit(msg)
                 elif t == "status":
                     self.status.emit(msg["msg"])
+                elif t == "backend":
+                    self.name = msg["name"]
         except (EOFError, OSError):
             pass
         if not self._dead and not self.proc.is_alive():

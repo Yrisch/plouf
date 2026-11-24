@@ -4,12 +4,19 @@
 # plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
-plouf editor (main window): build a keyframed 3D camera path through a Phantom
-simulation and preview it with shamrock column density renders.
+plouf main window, two modes (Mode menu, Ctrl+1 / Ctrl+2):
 
-    ./plouf [dumps ...] [--path path.json] [--sycl 0:0]
+* View / navigate (gui/viewmode.py, the default): explore the dumps with a free camera.
+* Movie editor (with --path, or when a camera path is opened): build a keyframed 3D
+  camera path through a Phantom simulation and preview it with column density renders
+  (shamrock, or the numpy SPH renderer without it).
 
-Layout
+    ./plouf [dumps ...] [--path path.json] [--sycl 0:0] [--backend auto|shamrock|numpy]
+
+The modes are independent (each its own camera and look); they share the dumps, the
+proxy samples, the sink tracks and the render process.
+
+Movie editor layout
     left    world view: whole simulation, camera path, keyframe cameras (drag handles)
     right   viewfinder: what the camera sees (instant particle proxy, then shamrock render)
     bottom  timeline (keyframes, simulation dump track, playhead) + inspectors
@@ -51,9 +58,10 @@ from PyQt6.QtGui import QColor
 from ..constants import AU_PER_PC
 from ..data.proxycache import ProxyCache
 from ..data.readers import READERS, get_reader
-from ..data.sinktracks import cache_path
+from ..data.sinktracks import cache_path, split_sinks
 from ..path.camera import ZNEAR, CamState, project
 from ..path.campath import CameraPath, make_orbit
+from ..render.backend import BACKENDS
 from ..render.compose import save_png, splat_column
 from ..render.stars import StarLight, star_exposure
 from .inspectors import CameraInspector, MovieInspector, OrbitDialog, RenderDialog
@@ -61,6 +69,7 @@ from .keymaps import KEYMAPS, keymap_hint
 from .qtutil import np_to_qimage
 from .timeline import Timeline
 from .viewfinder import Viewfinder
+from .viewmode import ViewMode
 from .workers import Backend, ProxyBridge, TracksBuilder
 from .worldview import WorldView
 
@@ -93,6 +102,7 @@ class Editor(QtWidgets.QMainWindow):
         self.live = CamState(pos=[0, -40, 15], target=[0, 0, 0], up=[0, 0, 1])
         self.live_dirty = False
         self.sample = None
+        self.sample_h = None  # smoothing lengths of the sample (grown for the sampling), None if unknown
         self.weight = None
         self.sinks = None
         self.meta = None
@@ -118,14 +128,19 @@ class Editor(QtWidgets.QMainWindow):
         self.tracks_status = "no simulation dumps"
         self._tracks_job = None
 
+        self.mode = None  # "view" or "movie", see set_mode
         self.starlight = StarLight()  # star colours / auto exposure in the editor
-        self.backend = Backend(args.sycl, args.sample)
+        self.backend = Backend(args.sycl, args.sample, getattr(args, "backend", None) or "auto")
         self.backend.loaded.connect(self.on_loaded)
         self.backend.frame.connect(self.on_frame)
         self.backend.error.connect(self.on_error)
         self.backend.status.connect(lambda m: self.statusBar().showMessage(m, 5000))
 
         self._build_ui()
+        self.backend.frame.connect(self.viewmode.on_frame)
+        self.backend.error.connect(self.viewmode.on_error)
+        self.backend.cancelled.connect(lambda m: self.pending.pop(m["id"], None))
+        self.backend.cancelled.connect(lambda m: self.viewmode.pending.pop(m["id"], None))
         self.ensure_tracks()
         self.ensure_proxy()
         self.history = [self.path.to_dict()]
@@ -141,7 +156,7 @@ class Editor(QtWidgets.QMainWindow):
 
         if self.path.keyframes:
             self.set_time(0.0)
-        self.refresh_all()
+        self.set_mode("movie" if args.path else "view")
         if self.path.dumps:
             self.request_refine()
         else:
@@ -186,26 +201,43 @@ class Editor(QtWidgets.QMainWindow):
         bottom.addWidget(self.cam_insp, 3)
         bottom.addWidget(self.movie_insp, 2)
 
-        central = QtWidgets.QWidget()
-        v = QtWidgets.QVBoxLayout(central)
+        self.movie_page = QtWidgets.QWidget()
+        v = QtWidgets.QVBoxLayout(self.movie_page)
         v.setContentsMargins(4, 4, 4, 4)
         v.addWidget(split, 1)
         v.addLayout(play_row)
         v.addLayout(bottom)
-        self.setCentralWidget(central)
+        self.viewmode = ViewMode(self)
+        self.stack = QtWidgets.QStackedWidget()
+        self.stack.addWidget(self.viewmode)
+        self.stack.addWidget(self.movie_page)
+        self.setCentralWidget(self.stack)
 
         self.progress = QtWidgets.QProgressBar()
         self.progress.setMaximumWidth(260)
         self.progress.hide()
         self.statusBar().addPermanentWidget(self.progress)
 
-        tb = self.addToolBar("main")
+        tb = self.toolbar = self.addToolBar("main")
         tb.setMovable(False)
         menu = self.menuBar()
         fm = menu.addMenu("&File")
+        mm = menu.addMenu("&Mode")
+        nm = self.nav_menu = menu.addMenu("&Navigate")
         em = menu.addMenu("&Edit")
         rm = menu.addMenu("&Render")
+        self.movie_menus = (em, rm)
         vm = menu.addMenu("&View")
+        self.mode_actions = {}
+        group = QtGui.QActionGroup(self)
+        for mode, text, key in (("view", "View / navigate", "Ctrl+1"), ("movie", "Movie editor", "Ctrl+2")):
+            a = QtGui.QAction(text, self, checkable=True)
+            a.setShortcut(QtGui.QKeySequence(key))
+            a.triggered.connect(lambda _=False, m=mode: self.set_mode(m))
+            group.addAction(a)
+            mm.addAction(a)
+            self.mode_actions[mode] = a
+        self.viewmode.build_menu(nm)
         kb = vm.addMenu("Keyboard layout")
         group = QtGui.QActionGroup(self)
         for name in KEYMAPS:
@@ -215,7 +247,9 @@ class Editor(QtWidgets.QMainWindow):
             group.addAction(a)
             kb.addAction(a)
 
-        def act(menu_, text, fn, shortcut=None, toolbar=False):
+        self.movie_actions = []  # enabled in the movie editor only
+
+        def act(menu_, text, fn, shortcut=None, toolbar=False, movie=True):
             a = QtGui.QAction(text, self)
             a.triggered.connect(fn)
             if shortcut:
@@ -223,16 +257,18 @@ class Editor(QtWidgets.QMainWindow):
             menu_.addAction(a)
             if toolbar:
                 tb.addAction(a)
+            if movie:
+                self.movie_actions.append(a)
             return a
 
         act(fm, "New path", self.new_path)
-        act(fm, "Open path…", self.open_path, "Ctrl+O", True)
+        act(fm, "Open path…", self.open_path, "Ctrl+O", True, movie=False)
         act(fm, "Save path", self.save_path, "Ctrl+S", True)
         act(fm, "Save path as…", self.save_path_as, "Ctrl+Shift+S")
         fm.addSeparator()
-        act(fm, "Set simulation dumps…", self.add_dumps, None, True)
+        act(fm, "Set simulation dumps…", self.add_dumps, None, True, movie=False)
         fm.addSeparator()
-        act(fm, "Quit", self.close, "Ctrl+Q")
+        act(fm, "Quit", self.close, "Ctrl+Q", movie=False)
         tb.addSeparator()
         act(em, "Undo", self.undo, "Ctrl+Z")
         act(em, "Redo", self.redo, "Ctrl+Shift+Z")
@@ -248,6 +284,7 @@ class Editor(QtWidgets.QMainWindow):
         act(rm, "Render movie…", self.render_movie, None, True)
         act(rm, "Stop movie render", self.stop_movie)
 
+        self.movie_shortcuts = []
         for key, fn in (
             ("Space", self.toggle_play),
             ("Shift+Space", self.play_to_next_key),
@@ -260,6 +297,7 @@ class Editor(QtWidgets.QMainWindow):
         ):
             s = QtGui.QShortcut(QtGui.QKeySequence(key), self)
             s.activated.connect(fn)
+            self.movie_shortcuts.append(s)
 
         pal = QtGui.QPalette()
         for role, col in (
@@ -277,6 +315,34 @@ class Editor(QtWidgets.QMainWindow):
         ):
             pal.setColor(role, col)
         QtWidgets.QApplication.instance().setPalette(pal)
+
+    def set_mode(self, mode):
+        """Show the view / navigate mode ("view") or the movie editor ("movie")."""
+        if mode == self.mode:
+            return
+        if self.mode == "view":
+            self.viewmode.deactivate()
+        elif self.mode == "movie" and self.playing:
+            self.toggle_play()
+        self.mode = mode
+        movie = mode == "movie"
+        self.mode_actions[mode].setChecked(True)
+        self.stack.setCurrentWidget(self.movie_page if movie else self.viewmode)
+        for a in self.movie_actions:
+            a.setEnabled(movie)
+        for s in self.movie_shortcuts:
+            s.setEnabled(movie)
+        for m in self.movie_menus:
+            m.menuAction().setVisible(movie)
+        self.viewmode.set_enabled(not movie)
+        self.nav_menu.menuAction().setVisible(not movie)
+        self.toolbar.setVisible(movie)
+        if movie:
+            self.refresh_all()
+            self.viewfinder.setFocus()
+            self.request_refine()
+        else:
+            self.viewmode.activate()
 
     def refresh_all(self):
         self.update_proxy()
@@ -354,7 +420,9 @@ class Editor(QtWidgets.QMainWindow):
         self.keyboard = name
         self.settings.setValue("keyboard", name)
         self.statusBar().showMessage(f"keyboard layout: {name.upper()} ({keymap_hint(name)})", 4000)
+        self.viewmode.update_shortcuts()
         self.viewfinder.update()
+        self.viewmode.canvas.update()
 
     # ------------------------------------------------------------------ sinks: tracks, selection, follow
 
@@ -419,19 +487,21 @@ class Editor(QtWidgets.QMainWindow):
             self.statusBar().showMessage(f"{e}: proxy views from shamrock only", 10000)
             return
         budget = getattr(self.args, "proxy_cache", 1024)
-        self.proxy = ProxyCache(reader, self.args.sample, budget, on_ready=self._proxy_bridge.ready.emit)
+        self.proxy = ProxyCache(reader, self.args.sample, budget, on_ready=self._proxy_bridge.ready.emit, processes=True)
         self.proxy_path = None
         self._prefetch_key = None
 
     def update_proxy(self):
         """Show the cached sample of the current dump, and plan the prefetching."""
+        if self.mode == "view":
+            return self.viewmode.update_proxy()
         if self.proxy is None or not self.path.dumps:
             return
         cur = self.path.dump_path(self.live)
         if cur != self.proxy_path:
             e = self.proxy.get(cur)
             if e is not None:
-                self._use_sample(e["pos"], e["weight"], cur)
+                self._use_sample(e["pos"], e["weight"], cur, e["h"])
         self._prefetch()
 
     def _prefetch(self):
@@ -450,9 +520,9 @@ class Editor(QtWidgets.QMainWindow):
             order += fd[np.argsort(urgency, kind="stable")].tolist()
         self.proxy.want([self.path.dumps[i] for i in order])
 
-    def _use_sample(self, pos, weight, path):
+    def _use_sample(self, pos, weight, path, h=None):
         first = self.sample is None
-        self.sample, self.weight, self.proxy_path = pos, weight, path
+        self.sample, self.weight, self.proxy_path, self.sample_h = pos, weight, path, h
         self.sample_id += 1
         if first:
             self.world.frame_all()
@@ -468,10 +538,12 @@ class Editor(QtWidgets.QMainWindow):
         if err:
             self.statusBar().showMessage(f"proxy: cannot read {os.path.basename(path)}: {err}", 10000)
             return
-        if path == self.path.dump_path(self.live) and path != self.proxy_path:
+        if self.mode == "view":
+            self.viewmode.on_proxy_ready(path, err)
+        elif path == self.path.dump_path(self.live) and path != self.proxy_path:
             e = self.proxy.get(path)
             if e is not None:
-                self._use_sample(e["pos"], e["weight"], path)
+                self._use_sample(e["pos"], e["weight"], path, e["h"])
                 self.world.update()
                 self.viewfinder.update()
         self.timeline.update()
@@ -485,17 +557,33 @@ class Editor(QtWidgets.QMainWindow):
             return ""
         return f"gas of {os.path.basename(self.proxy_path) if self.proxy_path else '—'}, reading {os.path.basename(cur)}…"
 
-    def display_sinks(self):
-        """Stars and cores at the current (fractional) dump for the instant views."""
+    def display_sinks(self, dump=None, look=None):
+        """
+        Sinks to draw (stars, cores / markers: split_sinks) at a (fractional) dump, default
+        the live camera's, with a look's sink mode, default the movie's, for the instant views.
+        """
+        look = self.path.look if look is None else look
         tr = self.path.tracks
         if tr is None:
-            return self.sinks
-        d = round(float(self.live.dump), 6)
-        if self._sink_cache[0] == (id(tr), d):
+            if self.sinks is None:
+                return None
+            return split_sinks(**self.sinks, pc_per_unit=self.pc_per_unit(), look=look)
+        d = round(float(self.live.dump if dump is None else dump), 6)
+        key = (id(tr), d, look.get("sinks"), look.get("star_max_racc_pc"))
+        if self._sink_cache[0] == key:
             return self._sink_cache[1]
-        sk = tr.sinks_at(d)
-        self._sink_cache = ((id(tr), d), sk)
+        sk = tr.sinks_at(d, look)
+        self._sink_cache = (key, sk)
         return sk
+
+    def disc_radius_hint(self, look):
+        """Panel text of the disc radius 0: the median accretion radius of the sinks drawn as discs."""
+        if self.sinks is None:
+            return "physical (r_acc)"
+        racc = split_sinks(**self.sinks, pc_per_unit=self.pc_per_unit(), look=look)["core_racc"]
+        if not len(racc):
+            return "physical (r_acc)"
+        return f"physical ({np.median(racc) * self.pc_per_unit() * AU_PER_PC:.3g} au)"
 
     def pc_per_unit(self):
         tr = self.path.tracks
@@ -509,16 +597,13 @@ class Editor(QtWidgets.QMainWindow):
         if tr is not None:
             ids = np.flatnonzero(tr.alive[int(np.clip(round(dump), 0, tr.ndump - 1))])
             return ids, tr.positions_at(ids, dump)
-        if self.sinks is not None and "star_id" in self.sinks:
-            return (
-                np.concatenate([self.sinks["star_id"], self.sinks["core_id"]]),
-                np.concatenate([self.sinks["star_pos"], self.sinks["core_pos"]]),
-            )
+        if self.sinks is not None:
+            return self.sinks["id"], self.sinks["pos"]
         return np.zeros(0, int), np.zeros((0, 3))
 
     def pick_sink(self, state, w, h, x, y, radius=8.0):
         """Sink drawn under the screen point (x, y) of a view of the camera state, or None."""
-        ids, pts = self.sink_points(self.live.dump)
+        ids, pts = self.sink_points(state.dump)
         if not len(ids):
             return None
         sx, sy, z = project(state, pts, w, h)
@@ -527,23 +612,22 @@ class Editor(QtWidgets.QMainWindow):
         i = int(np.argmin(d))
         return int(ids[i]) if d[i] <= radius else None
 
-    def sink_position(self, sink):
+    def sink_position(self, sink, dump=None):
         if sink is None:
             return None
         tr = self.path.tracks
         if tr is not None:
-            return tr.position(sink, self.live.dump)
-        if self.sinks is not None and "star_id" in self.sinks:
-            for kind in ("star", "core"):
-                hit = np.flatnonzero(self.sinks[kind + "_id"] == sink)
-                if len(hit):
-                    return self.sinks[kind + "_pos"][hit[0]]
+            return tr.position(sink, self.live.dump if dump is None else dump)
+        if self.sinks is not None:
+            hit = np.flatnonzero(self.sinks["id"] == sink)
+            if len(hit):
+                return self.sinks["pos"][hit[0]]
         return None
 
-    def sink_label(self, sink):
+    def sink_label(self, sink, dump=None, look=None):
         tr = self.path.tracks
         if tr is not None and tr.has(sink):
-            return tr.describe(sink, self.live.dump)
+            return tr.describe(sink, self.live.dump if dump is None else dump, self.path.look if look is None else look)
         return f"sink #{sink}"
 
     def select_sink(self, sink):
@@ -716,14 +800,15 @@ class Editor(QtWidgets.QMainWindow):
         return self.preview_img is not None and self.preview_key == self.look_key()
 
     def request_refine(self):
-        if self.playing or not self.path.dumps:
+        if self.mode != "movie" or self.playing or not self.path.dumps:
             return
         key = self.look_key()
         if key == self.preview_key or key in self.pending.values():
             return
         nx, ny = self.preview_size()
         rid = self.backend.request(
-            self.live, self.path.dump_path(self.live), nx, ny, self.path.look, exposure=self.live_exposure(nx, ny)
+            self.live, self.path.dump_path(self.live), nx, ny, self.path.look, exposure=self.live_exposure(nx, ny),
+            fmt=self.path.format,
         )
         self.pending = {rid: key}
         self.viewfinder.update()
@@ -731,17 +816,15 @@ class Editor(QtWidgets.QMainWindow):
     def on_loaded(self, msg):
         self.sinks = msg["sinks"]
         self.meta = msg["meta"]
+        if self.mode == "view":
+            self.viewmode.on_loaded(msg)
         cur = self.path.dump_path(self.live)
-        if self.proxy is None or (self.proxy_path != cur and cur in self.proxy.errors):
+        if self.mode == "movie" and (self.proxy is None or (self.proxy_path != cur and cur in self.proxy.errors)):
             self._use_sample(msg["sample"], msg["weight"], msg["meta"]["path"])  # no fast reader for it
-        racc = self.sinks.get("core_racc", [])
-        if len(racc):
-            au = np.median(racc) * self.meta["pc_per_unit"] * AU_PER_PC
-            self.movie_insp.core_r.setSpecialValueText(f"physical ({au:.0f} au)")
         m = self.meta
         self.statusBar().showMessage(
-            f"loaded {os.path.basename(m['path'])}: {m['npart']} particles, {len(self.sinks['star_pos'])} stars, "
-            f"{len(self.sinks['core_pos'])} cores, t = {m['time_myr']:.2f} Myr ({m['load_time']:.1f} s)",
+            f"loaded {os.path.basename(m['path'])}: {m['npart']} particles, {len(self.sinks['id'])} sinks, "
+            f"t = {m['time_myr']:.2f} Myr ({m['load_time']:.1f} s)",
             8000,
         )
         self.refresh_all()
@@ -776,7 +859,8 @@ class Editor(QtWidgets.QMainWindow):
             return
         nx, ny = self.path.resolution
         rid = self.backend.request(
-            self.live, self.path.dump_path(self.live), nx, ny, self.path.look, keep=True, exposure=self.live_exposure(nx, ny)
+            self.live, self.path.dump_path(self.live), nx, ny, self.path.look, keep=True, exposure=self.live_exposure(nx, ny),
+            fmt=self.path.format,
         )
         self.exports[rid] = fname
         self.statusBar().showMessage(f"rendering {nx}×{ny} frame…")
@@ -804,6 +888,7 @@ class Editor(QtWidgets.QMainWindow):
         self.history = [self.path.to_dict()]
         self.hpos = 0
         self.saved = self.history[0]
+        self.set_mode("movie")  # camera paths are the movie editor's
         self.set_time(0)
 
     def save_path(self):
@@ -841,6 +926,7 @@ class Editor(QtWidgets.QMainWindow):
         self.ensure_proxy()
         self.commit()
         self.path_edited()
+        self.viewmode.dumps_changed()
         self.request_refine()
 
     # ------------------------------------------------------------------ tools
@@ -899,6 +985,8 @@ class Editor(QtWidgets.QMainWindow):
             str(dlg.scale.value()),
             "--sycl",
             self.args.sycl,
+            "--backend",
+            getattr(self.args, "backend", None) or "auto",
         ]
         if dlg.stereo.isChecked():
             cmd += ["--stereo", str(dlg.angle.value())]
@@ -975,10 +1063,15 @@ def expand_dumps(items):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="plouf", description="plouf: camera path editor for Phantom dumps rendered with shamrock")
+    ap = argparse.ArgumentParser(
+        prog="plouf", description="plouf: explore Phantom dumps and make movies of them, rendered with shamrock (or numpy)"
+    )
     ap.add_argument("dumps", nargs="*", help="Phantom dumps in time order (globs accepted, e.g. 'esc_00*')")
-    ap.add_argument("--path", help="camera path JSON to open (created on save if missing)")
+    ap.add_argument("--path", help="camera path JSON to open in the movie editor (created on save if missing)")
     ap.add_argument("--sycl", default="0:0", help="shamrock sycl config (default 0:0)")
+    ap.add_argument(
+        "--backend", choices=BACKENDS, default="auto", help="renderer: shamrock, numpy (slower), auto: shamrock if installed"
+    )
     ap.add_argument("--sample", type=int, default=400_000, help="particles kept for the instant proxy views")
     ap.add_argument(
         "--format", choices=list(READERS), default=None, help="dump format for the fast readers (default: the path's, phantom)"

@@ -261,7 +261,9 @@ def test_old_files_get_the_new_look_defaults_and_per_key_ease():
                                             {"t": 0, "pos": [0, -2, 0], "target": [0, 0, 0], "up": [0, 0, 1]}],
                               "look": {"cmap": "magma", "ease": True}})  # fmt: skip
     assert q.look["cmap"] == "magma"
-    assert all(q.look[k] == v for k, v in DEFAULT_LOOK.items() if k != "cmap")
+    assert q.look["sinks"] == "cluster"  # from before the sink modes: rendered as they were
+    assert all(q.look[k] == v for k, v in DEFAULT_LOOK.items() if k not in ("cmap", "sinks"))
+    assert CameraPath().look["sinks"] == "markers" and CameraPath.from_dict({}).look["sinks"] == "markers"
     assert "ease" not in q.look
     assert [k.state.ease for k in q.keyframes] == [True, False]  # the old global ease eased the first key
     assert [k.stretch for k in q.keyframes] == [1, 1]

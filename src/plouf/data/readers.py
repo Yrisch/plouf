@@ -7,9 +7,10 @@
 Fast, partial readers of simulation dumps, for what plouf needs without a full load:
 
 * ``read_sinks(path)``: the sink particles (trajectories for cameras following a sink),
-* ``read_gas(path)``: the gas particle positions (instant proxy views).
+* ``read_gas(path)``: the gas particles (instant proxy views, and the numpy renderer).
 
-The real renders do not use these: they load the dump in shamrock (render/backend.py).
+With shamrock, the real renders do not use these: they load the dump in shamrock
+(render/backend.py). Without it, the numpy renderer (render/sph.py) renders from read_gas.
 
 A reader is a subclass of DumpReader registered in READERS under its format name
 (``--format`` on the command line, ``"format"`` in the camera path file). To support
@@ -43,6 +44,7 @@ class DumpReader:
         """
         {"time", "udist", "umass", "utime",
          "pos" (n,3) float array of every particle slot,
+         "h" (n,) smoothing lengths (|h|, may be <= 0 for dead slots),
          "alive" (n,) bool (False for accreted / dead particles),
          "ids" (n,) int64 permanent particle ids, or None (then the slot index is used),
          "mass" particle mass (scalar or (n,) array)}
@@ -174,6 +176,7 @@ class PhantomReader(DumpReader):
         out = self._units(header)
         out.update(
             pos=pos,
+            h=a["h"],
             alive=alive,
             ids=a["iorig"].astype(np.int64) if "iorig" in a else None,
             mass=float(header["massoftype"][0]) if "massoftype" in header else 1.0,

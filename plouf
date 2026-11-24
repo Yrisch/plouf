@@ -9,17 +9,20 @@
 #   ./plouf test [pytest options]                 run the tests (tests/)
 # Environment (see README.md, "Installation"):
 #   PLOUF_PYTHON     python interpreter to use (default: python3 on PATH, e.g. the active venv)
-#   SHAMROCK_BUILD   shamrock build directory holding pysham/ (default: ../../build)
+#   SHAMROCK_BUILD   shamrock build directory holding pysham/ (default: ../../build; optional:
+#                    without it renders use the numpy SPH renderer)
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 SHAMROCK_BUILD="${SHAMROCK_BUILD:-$HERE/../../build}"
 PY="${PLOUF_PYTHON:-python3}"
-if [ ! -d "$SHAMROCK_BUILD/pysham" ]; then
-    echo "plouf: no shamrock python module in $SHAMROCK_BUILD/pysham;" \
-         "set SHAMROCK_BUILD to your shamrock build directory" >&2
-    exit 1
+if [ -d "$SHAMROCK_BUILD/pysham" ]; then
+    export PYTHONPATH="$HERE/src:$SHAMROCK_BUILD/pysham${PYTHONPATH:+:$PYTHONPATH}"
+    export LD_LIBRARY_PATH="$SHAMROCK_BUILD${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+else
+    # still works without shamrock: renders fall back to the numpy SPH renderer
+    [ "$1" = "test" ] || echo "plouf: no shamrock python module in $SHAMROCK_BUILD/pysham" \
+         "(set SHAMROCK_BUILD to your shamrock build directory); using the numpy renderer" >&2
+    export PYTHONPATH="$HERE/src${PYTHONPATH:+:$PYTHONPATH}"
 fi
-export PYTHONPATH="$HERE/src:$SHAMROCK_BUILD/pysham${PYTHONPATH:+:$PYTHONPATH}"
-export LD_LIBRARY_PATH="$SHAMROCK_BUILD${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 if [ "$1" = "render" ]; then
     shift
     exec "$PY" -m plouf.render_movie "$@"

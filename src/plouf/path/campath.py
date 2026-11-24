@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ..constants import DEFAULT_SINK_MODE, STAR_MAX_RACC_PC
 from .camera import CamState, normalize, rotate
 
 
@@ -147,6 +148,10 @@ DEFAULT_LOOK = {
     "auto_exposure": False,  # star exposure follows the brightest stars in view (+ the key exposure)
     "time_label": True,
     "label_size": 36.0,  # time label height in px on a 1080 px tall frame (scaled with the frame height)
+    "sinks": DEFAULT_SINK_MODE,  # how sinks are drawn, see constants.SINK_MODES
+    "star_max_racc_pc": STAR_MAX_RACC_PC,  # "cluster": sinks with a smaller accretion radius [pc] are stars
+    "marker_size": 3.0,  # "markers": smallest disc radius, px on a 1080 px tall frame
+    "marker_color": [0.55, 0.85, 1.0],
 }
 
 
@@ -447,13 +452,16 @@ class CameraPath:
 
     @staticmethod
     def from_dict(d):
+        look = dict(d.get("look", {}))
+        if "look" in d and "sinks" not in look:
+            look["sinks"] = "cluster"  # files from before the sink modes: stars and cores, as they were rendered
         p = CameraPath(
             keyframes=[Keyframe.from_dict(k) for k in d.get("keyframes", [])],
             fps=float(d.get("fps", 30.0)),
             duration=float(d.get("duration", 10.0)),
             resolution=tuple(d.get("resolution", (1920, 1080))),
             dumps=list(d.get("dumps", [])),
-            look=dict(d.get("look", {})),
+            look=look,
             format=d.get("format", "phantom"),
         )
         # files from before per-key ease: the global "ease in/out" eased the first key

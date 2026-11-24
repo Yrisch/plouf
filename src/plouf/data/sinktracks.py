@@ -20,8 +20,46 @@ import os
 
 import numpy as np
 
-from ..constants import MSUN_G, PC_CM, STAR_MAX_RACC_PC
+from ..constants import DEFAULT_SINK_MODE, MSUN_G, PC_CM, STAR_MAX_RACC_PC
 from .readers import DEFAULT_FORMAT, get_reader
+
+
+def split_sinks(id, pos, mass, racc, pc_per_unit, look=None):  # noqa: A002 (the key of the sink dicts)
+    """
+    Sinks to draw, by look["sinks"] (constants.SINK_MODES): {"star_id", "core_id",
+    "star_pos", "core_pos", "star_mass", "core_mass" [Msun], "core_racc" [code units]}.
+    Stars get the star photometry (render/stars.py), "cores" are drawn as discs (the cores
+    of "cluster", every sink with "markers", see compose.sink_discs). id, pos, mass [Msun],
+    racc [code units]: the alive sinks (the dict of SinkTracks.raw_at, SimScene.sinks).
+    """
+    look = look or {}
+    mode = look.get("sinks", DEFAULT_SINK_MODE)
+    ids = np.asarray(id, dtype=int)
+    if mode == "cluster":
+        star = racc * pc_per_unit < look.get("star_max_racc_pc", STAR_MAX_RACC_PC)
+    elif mode == "stars":
+        star = np.ones(len(ids), bool)
+    else:
+        star = np.zeros(len(ids), bool)
+    disc = ~star & (mode != "hidden")
+    return {
+        "star_id": ids[star],
+        "core_id": ids[disc],
+        "star_pos": pos[star],
+        "core_pos": pos[disc],
+        "star_mass": mass[star],
+        "core_mass": mass[disc],
+        "core_racc": racc[disc],
+    }
+
+
+def sink_kind(racc, pc_per_unit, look=None):
+    """What one sink is drawn as, for the UI: "star", "core" or "sink"."""
+    look = look or {}
+    mode = look.get("sinks", DEFAULT_SINK_MODE)
+    if mode == "cluster":
+        return "star" if racc * pc_per_unit < look.get("star_max_racc_pc", STAR_MAX_RACC_PC) else "core"
+    return "star" if mode == "stars" else "sink"
 
 
 def _cache_key(dumps, fmt):
@@ -169,27 +207,25 @@ class SinkTracks:
             + (s**3 - s**2) * m1
         )
 
-    def sinks_at(self, dump):
+    def raw_at(self, dump):
         """
-        Stars and cores alive at a (fractional) dump, at their smooth position there:
-        {"star_id", "core_id", "star_pos", "core_pos", "star_mass", "core_mass" [Msun],
-        "core_racc" [code units]} (the same dict as backend.SimScene.sinks).
+        The sinks alive at a (fractional) dump, at their smooth position there: {"id", "pos",
+        "mass" [Msun], "racc" [code units]} (the same dict as backend.SimScene.sinks).
         """
         i = int(np.clip(round(dump), 0, self.ndump - 1))
         ids = np.flatnonzero(self.alive[i])
-        pos = self.positions_at(ids, dump)
-        star = self.racc[i, ids] * self.pc_per_unit < STAR_MAX_RACC_PC
         return {
-            "star_id": ids[star],
-            "core_id": ids[~star],
-            "star_pos": pos[star],
-            "core_pos": pos[~star],
-            "star_mass": self.mass[i, ids[star]] * self.msun_per_unit,
-            "core_mass": self.mass[i, ids[~star]] * self.msun_per_unit,
-            "core_racc": self.racc[i, ids[~star]],
+            "id": ids,
+            "pos": self.positions_at(ids, dump),
+            "mass": self.mass[i, ids] * self.msun_per_unit,
+            "racc": self.racc[i, ids],
         }
 
-    def describe(self, sink, dump):
+    def sinks_at(self, dump, look=None):
+        """Sinks to draw at a (fractional) dump (split_sinks with the look's sink mode)."""
+        return split_sinks(**self.raw_at(dump), pc_per_unit=self.pc_per_unit, look=look)
+
+    def describe(self, sink, dump, look=None):
         """Short text for the UI: kind, mass, existence."""
         i = int(np.clip(round(dump), 0, self.ndump - 1))
         m = self.mass[i, sink]
@@ -202,5 +238,4 @@ class SinkTracks:
                 return f"sink #{sink} (never alive)"
             when = "forms at dump " + str(alive[0]) if alive[0] > i else "gone after dump " + str(alive[-1])
             return f"sink #{sink} ({when})"
-        kind = "star" if r * pc < STAR_MAX_RACC_PC else "core"
-        return f"{kind} #{sink} · {m * msun:.3g} M☉"
+        return f"{sink_kind(r, pc, look)} #{sink} · {m * msun:.3g} M☉"

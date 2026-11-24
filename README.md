@@ -1,26 +1,35 @@
-# plouf — camera paths through Phantom simulations, rendered by shamrock
+# plouf — explore Phantom simulations and make movies of them, rendered by shamrock
 
 ```bash
-./plouf ../esc_00*                      # editor, dumps in time order (globs ok)
-./plouf ../esc_00* --path orbit.json    # open / create a path file
+./plouf ../esc_00*                      # view mode: explore the dumps (time order, globs ok)
+./plouf ../esc_00* --path orbit.json    # movie editor: open / create a camera path file
 ./plouf render orbit.json --scale 0.5   # batch render (draft at half res)
 ./plouf render orbit.json --frames 0:150 --sycl 0:0 --mp4 movie.mp4
 ./plouf render orbit.json --stereo      # flat-screen stereo pair (even files left eye, odd right)
 ```
+
+plouf (French for *splash*) has two modes, switched in the **Mode** menu (Ctrl+1 / Ctrl+2):
+a [view mode](#view-mode) to navigate through the dumps, the default, and a
+[movie editor](#movie-editor) to build keyframed camera paths, opened by `--path` or
+when you open a camera path. The renders use shamrock, or a numpy SPH renderer when
+shamrock is not installed (see [Rendering without shamrock](#rendering-without-shamrock)).
 
 Working on the code (or letting an AI agent do it)? Read [`CLAUDE.md`](CLAUDE.md) first:
 architecture, invariants of the path interpolation, how to extend and test.
 
 ## Installation
 
-plouf is pure Python; nothing to compile besides shamrock itself.
+plouf is pure Python; nothing to compile besides shamrock itself, which is optional.
 
 1. **Build shamrock with its python module** (see the shamrock documentation). The build
    directory must contain `pysham/` and the `libsham*.so` libraries. The launcher looks
    for it in `../../build` (plouf sitting in `<shamrock>/tmp/plouf`); otherwise set
-   `SHAMROCK_BUILD`.
+   `SHAMROCK_BUILD`. Without shamrock, plouf still runs: the renders use the numpy SPH
+   renderer (slower, see [Rendering without shamrock](#rendering-without-shamrock)) and
+   the launcher says so at start.
 2. **Create a python environment** with the dependencies. Use the same python version
-   as the one shamrock was built against, or `import shamrock` will fail:
+   as the one shamrock was built against, or `import shamrock` will fail (plouf then
+   falls back to the numpy renderer):
 
    ```bash
    python3 -m venv ~/venvs/plouf
@@ -45,24 +54,56 @@ plouf is pure Python; nothing to compile besides shamrock itself.
        -c "import shamrock, PyQt6, scipy, matplotlib, PIL; print('ok')"
    ```
 
-   then `./plouf your_dumps_*`. Optionally link the launcher into your `PATH`
+   (without shamrock, leave `shamrock` out of that line), then `./plouf your_dumps_*`.
+   Optionally link the launcher into your `PATH`
    (`ln -s $PWD/plouf ~/.local/bin/plouf`); it resolves its own location.
 
 Caches: sink trajectories go to `~/.cache/plouf/` (`$XDG_CACHE_HOME`), editor settings
 to the Qt settings of the user.
 
-## Editor
+## View mode
+
+The default mode: the view fills the window, with a side panel. No keyframes, no
+timeline: fly around a dump, step through the dumps, follow a star, save images.
+
+| keys (as in splash where it has one) | |
+|---|---|
+| **Space** / → , **B** / ← | next / previous dump (Shift: 10 dumps) |
+| Home / End | first / last dump |
+| **P** | play through the dumps (rate in the panel, waits for each dump's gas) |
+| mouse | LMB orbit · Shift+LMB / MMB pan · RMB look around |
+| wheel | dolly · Ctrl+wheel fov · Alt+wheel dolly zoom |
+| + / - | zoom in / out (fov) |
+| 1 / 3 / 7 | front / side / top view (AZERTY: & / " / è) |
+| WASD/RF, Q/E | fly, roll (AZERTY ZQSD/RF, A/E; Shift ×5) |
+| O | recentre on the gas |
+| C | auto colour range from the gas in view |
+| click, **T**, Shift+T | select a star / core, look at it / ride along with it through the dumps (T again: stop) |
+| G · H · Esc | thirds grid · key help · deselect |
+| Ctrl+E | save the view as a PNG (width in the panel, the view's aspect) |
+
+All of them are also in the **Navigate** menu. The panel has the dump slider and
+play controls, the camera (fov, distance, axis views, follow), the display (Σ range,
+colormap, star exposure, layers, *render size*: the real render's size relative to
+the view, lower is faster) and the image export. Like in the movie editor, the view shows
+the instant particle proxy while you move, then the real render when you stop.
+
+The view mode has its own camera and look, independent from the movie editor's (switching
+mode does not carry the view over); both share the dumps, the proxy cache and the sink
+trajectories.
+
+## Movie editor
 
 | area | what |
 |---|---|
 | left, **world view** | simulation overview (particle splat, stars, cores), the path (coloured by time), every keyframe as a frustum with its number, the live camera in white. Drag the dots to move camera positions, the crosses to move targets (Ctrl: both). |
-| right, **viewfinder** | what the camera sees. Instant particle proxy while you move, then the real shamrock render (gas + stars + cores, same compositor as the movie) ~0.2 s after you stop. |
+| right, **viewfinder** | what the camera sees. Instant particle proxy while you move, then the real render (shamrock or numpy; gas + stars + cores, same compositor as the movie) ~0.2 s after you stop. Moving again drops a render in progress, so it never slows the view down. |
 | **timeline** | keyframes (drag to retime, Shift+drag to stretch the segment before a key, right-click to delete), simulation dump track, playhead (click / drag to scrub). Stretched segments are drawn in orange with their factor. |
 | **camera inspector** | exact numbers for the camera at the playhead + per-key look (Σ range, star exposure, extinction). |
 | **movie & look** | duration, fps, output resolution, preview resolution, colormap, layers, star PSF on/off (off: the proxy dots), spikes, bright star glow, auto exposure, time label size. |
 
-Started without dumps (`./plouf`), the editor asks for them: select the dumps, or a
-camera path `.json`, which is opened with the dumps it lists.
+Started without dumps (`./plouf`), plouf asks for them: select the dumps, or a
+camera path `.json`, which is opened in the movie editor with the dumps it lists.
 
 Workflow: scrub to a time, fly the camera in the viewfinder, press **K**.
 When the playhead is on a keyframe, all edits change that keyframe.
@@ -91,16 +132,23 @@ live camera to the path · Ctrl+Z/Ctrl+Shift+Z undo/redo · Ctrl+E export full-r
 
 The viewfinder proxy and the world view splat a sample of 400k gas particles per dump
 (`--sample`). The samples are read straight from the dump files by a fast reader (only
-the positions, ~0.1-0.2 s per dump, no shamrock) in a background thread, kept in memory
+the positions and smoothing lengths, ~0.2 s per dump, no shamrock) by 4 background reader
+processes (they exit with plouf, even if it is killed), kept in memory
 (`--proxy-cache`, MB, default 1024: ~210 dumps) and prefetched: the current dump first,
 then the dumps the movie visits, nearest in movie time first (ahead of the playhead
 first). A green strip under the timeline dump track marks the frames whose gas is in
-memory. Scrubbing and playing (~15 fps) show the gas of every frame at once; shamrock
-only loads a dump for the real preview when you stop, and for the renders.
+memory. Scrubbing and playing (~15 fps) show the gas of every frame at once; the
+renderer only loads a dump for the real preview when you stop, and for the renders. The
+view mode uses the same cache (current dump first, then the next ones).
 
 The sample is the 400k living particles with the lowest fixed random rank of their id
 (`iorig` in Phantom): the same particles from one dump to the next, an accreted one is
-replaced by the next ranked one, so the proxy does not flicker.
+replaced by the next ranked one, so the proxy does not flicker. Each sampled particle keeps
+its smoothing length, grown by (N / 400k)^(1/3) for the sampling, and is drawn as a Gaussian
+of its kernel's width on screen: the proxy is sharp where the gas is dense, smooth where it
+is diffuse, within ~0.1 dex of the real render. It is drawn at the view's resolution (up to
+full HD) once the view stops changing for 0.2 s, coarser and from half of the sample while
+you move or play.
 
 ### Dump formats
 
@@ -108,8 +156,9 @@ The fast readers (gas sample for the proxy, sinks for the trajectories) are plug
 `src/plouf/data/readers.py` defines `DumpReader` (`read_gas`, `read_sinks`) and the `READERS`
 registry. `phantom` is the only one so far and the default; the format is stored in the
 path file (`"format"`) and can be set with `--format`. Supporting another code (gadget,
-shamrock dumps, ...) means adding a reader there. The real renders still load the dumps
-through shamrock (`src/plouf/render/backend.py`).
+shamrock dumps, ...) means adding a reader there. The real renders load the dumps
+through shamrock (`src/plouf/render/backend.py`), or, without shamrock, with this
+reader (`src/plouf/render/sph.py`).
 
 ## Following a star or a core
 
@@ -178,12 +227,14 @@ camera stays level; only a roll (Q/E) changes it.
 
 ## Rendering
 
-* gas: `model.render_column_integ("rho")` with `shamrock.math.Camera3d_f64_3`, log Σ in M☉/pc².
+* gas: `model.render_column_integ("rho")` with `shamrock.math.Camera3d_f64_3`, log Σ in M☉/pc²
+  (or the numpy SPH renderer, below).
 * stars (sinks with accretion radius < 0.01 pc), in true colour:
   * luminosity, radius, temperature from the mass (main sequence relations); black body
     through the CIE 1931 colour matching functions → linear sRGB (a lookup table in T);
   * flux at the true distance from the camera, dimmed by the gas column between camera and
-    star (two shamrock half-ray integrals, Cardelli extinction at the sRGB wavelengths,
+    star (two shamrock half-ray integrals, or the numpy renderer's kernel sum, Cardelli
+    extinction at the sRGB wavelengths,
     `extinction` multiplier per key);
   * analytic PSF stamped at each star's sub-pixel position: Moffat core (FWHM 1.6 px on a
     1920 px frame, ×`psf_scale`, wider in red), Moffat halo, optional diffraction spikes
@@ -206,8 +257,35 @@ camera stays level; only a roll (Q/E) changes it.
     [Star exposure](#star-exposure)); the key exposure is added to it.
 * cores (other sinks): orange discs of their physical size, the accretion radius stored in the
   dump (4000 au here). `core_radius` (code length units, 0 / `null` = physical) overrides it.
+* **sink modes** (`sinks`, the *sinks* menu of both panels, which then show only the
+  controls of that mode: star PSF, spikes and their angle, glow, auto exposure and star
+  exposure with stars; core or marker radius with discs): how sink particles are drawn.
+  * `markers` (default): every sink a disc of its accretion radius, at least `marker_size`
+    px (on a 1080 px frame) so tiny ones stay visible, in `marker_color`;
+  * `cluster`: the stars and cores above: sinks with an accretion radius below
+    `star_max_racc_pc` (default 0.01 pc) are stars, the others cores. Path files from before
+    the sink modes open in this mode, so they render as before;
+  * `stars`: every sink is a star (photometry from its mass);
+  * `hidden`: not drawn (still selectable and followable).
 * time label (`time_label`): simulation time in the bottom right corner, `label_size` px
   high on a 1080 px tall frame (default 36), scaled with the output height.
+
+### Rendering without shamrock
+
+`--backend auto|shamrock|numpy` (editor and `render`, default `auto`): `auto` uses
+shamrock when its python module imports, the numpy SPH renderer (`render/sph.py`)
+otherwise. The panel of the view mode and the HUD say which one renders.
+
+The numpy renderer reads the gas with the fast reader and splats each particle's M4
+kernel integrated along the line of sight of each pixel, as splash does, with the exact
+perspective (the distance from the particle to each pixel's ray). Kernels wider than a
+few pixels are drawn on coarser grids and upsampled, so the cost per particle is bounded.
+Its images match shamrock's to ~1% (median 0.001 dex on a 2M particle dump, from outside
+and from inside the cloud; `tests/test_shamrock.py`). The star extinction integrates the
+same kernels between the camera and each star. It runs on the CPU (a few threads): about
+2-3 s for 2M particles at 640×360, 5 s at 1080p, so lower the view mode's *render size*
+or the editor's *preview width* for snappier previews. Only Phantom dumps are rendered
+through shamrock; the numpy renderer renders any format with a fast reader.
 
 ### Star exposure
 
@@ -267,14 +345,16 @@ On a large screen keep the angle moderate: gas far behind the target is up to ab
 ## Layout
 
 ```
-plouf                   launcher (editor, `render`, `test`)
+plouf                   launcher (view mode / movie editor, `render`, `test`)
 examples/orbit.json     a 360° orbit path (open it with your dumps: ./plouf dumps... --path examples/orbit.json)
 src/plouf/
   constants.py          units, star / core threshold
   path/                 camera.py (camera maths, projection), campath.py (keys, interpolation, following, files)
   data/                 readers.py (fast dump readers), sinktracks.py (sink trajectories), proxycache.py (proxy samples)
-  render/               compose.py (gas, cores, labels), stars.py (star layer), backend.py (shamrock scene, render process)
-  gui/                  app.py (main window), worldview, viewfinder, timeline, inspectors, workers, keymaps, qtutil
+  render/               compose.py (gas, cores, labels), stars.py (star layer), sph.py (numpy SPH renderer),
+                        backend.py (shamrock scene, backend choice, render process)
+  gui/                  app.py (main window, modes), viewmode (view mode), worldview, viewfinder, timeline, inspectors,
+                        workers, keymaps, qtutil
   render_movie.py       batch renderer (./plouf render)
 tests/                  pytest suite, with a writer of small synthetic Phantom dumps
 ```
@@ -282,7 +362,7 @@ tests/                  pytest suite, with a writer of small synthetic Phantom d
 ## Tests
 
 ```bash
-./plouf test                                 # everything that needs neither shamrock nor a dump
+./plouf test                                 # everything that needs neither shamrock nor a dump (numpy renderer included)
 PLOUF_TEST_DUMP=../esc_00500 ./plouf test    # + the shamrock tests on a real dump
 ./plouf test -m "not gui"                    # without the (offscreen) editor tests
 ```
@@ -290,8 +370,11 @@ PLOUF_TEST_DUMP=../esc_00500 ./plouf test    # + the shamrock tests on a real du
 The tests run on small synthetic Phantom dumps (`tests/phantom.py`): camera maths, the serial
 interpolation (adding / editing a key only changes the path next to it, holds, ease,
 no overshoot), following sinks, the dump reader, sink tracks, the proxy sample and cache,
-the star photometry / PSF / stretch / auto exposure, compositing, and the editor
-(offscreen, with a stub of the render process). `pytest` is the only extra dependency.
+the star photometry / PSF / stretch / auto exposure, compositing, the numpy renderer
+(against the exact kernel integrals, and in the render process), and the editor in both
+modes (offscreen, with a stub of the render process). `pytest` is the only extra
+dependency. With `PLOUF_TEST_DUMP` and shamrock, the numpy renderer is also compared to
+shamrock on that dump.
 
 ## License
 
