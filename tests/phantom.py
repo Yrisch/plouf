@@ -1,11 +1,11 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
 Writer of small synthetic Phantom binary dumps for the tests: the layout read by
-cinecam.data.readers.PhantomReader (magic record, file id, 8 header tables, block
+plouf.data.readers.PhantomReader (magic record, file id, 8 header tables, block
 table, then per block a tag record and a data record per array).
 """
 
@@ -13,7 +13,7 @@ import struct
 
 import numpy as np
 
-from cinecam.constants import MSUN_G, MYR_S, PC_CM
+from plouf.constants import MSUN_G, MYR_S, PC_CM
 
 # data kinds: fortran int, int8, int16, int32, int64, default real, real4, real8
 INT1, INT8, DEFAULT_REAL, REAL4, REAL8 = 1, 4, 5, 6, 7

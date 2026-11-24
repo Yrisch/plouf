@@ -1,10 +1,10 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
-Fast, partial readers of simulation dumps, for what cinecam needs without a full load:
+Fast, partial readers of simulation dumps, for what plouf needs without a full load:
 
 * ``read_sinks(path)``: the sink particles (trajectories for cameras following a sink),
 * ``read_gas(path)``: the gas particle positions (instant proxy views).

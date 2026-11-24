@@ -1,7 +1,7 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """The batch renderer's frame bookkeeping (mono and stereo), with a stub in place of shamrock."""
 
@@ -11,9 +11,9 @@ import sys
 import numpy as np
 import pytest
 
-from cinecam import render_movie
-from cinecam.path.camera import CamState, project
-from cinecam.path.campath import CameraPath, Keyframe
+from plouf import render_movie
+from plouf.path.camera import CamState, project
+from plouf.path.campath import CameraPath, Keyframe
 
 
 class StubScene:
@@ -30,7 +30,7 @@ class StubRenderer:
     calls = []
 
     def __init__(self, scene):
-        from cinecam.render.stars import StarLight
+        from plouf.render.stars import StarLight
 
         self.starlight = StarLight()
         self.tracks = None
@@ -54,7 +54,7 @@ def run(sim, tmp_path, monkeypatch):
     out = tmp_path / "frames"
 
     def go(*opts):
-        monkeypatch.setattr(sys, "argv", ["cinecam render", str(f), "--out", str(out), *opts])
+        monkeypatch.setattr(sys, "argv", ["plouf render", str(f), "--out", str(out), *opts])
         render_movie.main()
         return sorted(os.listdir(out)), p
 

@@ -1,15 +1,15 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 import numpy as np
 import pytest
 from conftest import NGAS, SINK_M, SINK_RACC, SINK_V, sink_pos
 from phantom import write_dump
 
-from cinecam.constants import MSUN_G, PC_CM
-from cinecam.data.readers import READERS, PhantomReader, get_reader
+from plouf.constants import MSUN_G, PC_CM
+from plouf.data.readers import READERS, PhantomReader, get_reader
 
 
 def test_registry():

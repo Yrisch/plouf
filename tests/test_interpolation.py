@@ -1,7 +1,7 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
 The serial interpolation (see CLAUDE.md, invariants 1-2): keys are shot one after the
@@ -13,8 +13,8 @@ import math
 import numpy as np
 import pytest
 
-from cinecam.path.camera import CamState
-from cinecam.path.campath import DEFAULT_LOOK, CameraPath, Keyframe, SerialHermite, Smoothstep, make_orbit
+from plouf.path.camera import CamState
+from plouf.path.campath import DEFAULT_LOOK, CameraPath, Keyframe, SerialHermite, Smoothstep, make_orbit
 
 rng = np.random.default_rng(7)
 

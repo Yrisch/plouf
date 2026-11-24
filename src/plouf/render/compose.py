@@ -1,10 +1,10 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
-Frame compositing for cinecam: gas column density colormap, proxy splats, cores, labels.
+Frame compositing for plouf: gas column density colormap, proxy splats, cores, labels.
 
 Only numpy / scipy / matplotlib (colormaps) / PIL: used both by the render server
 (shamrock process) and by the editor (proxy previews).

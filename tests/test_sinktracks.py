@@ -1,7 +1,7 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 import os
 
@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from conftest import NDUMP, SINK_M, sink_pos
 
-from cinecam.data.sinktracks import SinkTracks, cache_path
+from plouf.data.sinktracks import SinkTracks, cache_path
 
 
 def test_build_shapes_and_alive(tracks):

@@ -1,12 +1,12 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
 Tests against shamrock and a real dump, skipped unless both are available:
 
-    CINECAM_TEST_DUMP=/path/to/phantom_dump ./cinecam test
+    PLOUF_TEST_DUMP=/path/to/phantom_dump ./plouf test
 """
 
 import multiprocessing as mp
@@ -15,17 +15,17 @@ import os
 import numpy as np
 import pytest
 
-DUMP = os.environ.get("CINECAM_TEST_DUMP")
+DUMP = os.environ.get("PLOUF_TEST_DUMP")
 pytestmark = [
     pytest.mark.shamrock,
-    pytest.mark.skipif(not DUMP or not os.path.exists(DUMP), reason="set CINECAM_TEST_DUMP to a Phantom dump"),
+    pytest.mark.skipif(not DUMP or not os.path.exists(DUMP), reason="set PLOUF_TEST_DUMP to a Phantom dump"),
 ]
 
 
 @pytest.fixture(scope="module")
 def scene():
     pytest.importorskip("shamrock")
-    from cinecam.render.backend import SimScene, init_shamrock
+    from plouf.render.backend import SimScene, init_shamrock
 
     init_shamrock("0:0")
     sc = SimScene()
@@ -34,7 +34,7 @@ def scene():
 
 
 def test_fast_reader_matches_shamrock(scene):
-    from cinecam.data.readers import get_reader
+    from plouf.data.readers import get_reader
 
     rd = get_reader("phantom")
     s = rd.read_sinks(DUMP)
@@ -49,9 +49,9 @@ def test_fast_reader_matches_shamrock(scene):
 
 
 def test_frame_render(scene):
-    from cinecam.path.camera import CamState
-    from cinecam.path.campath import DEFAULT_LOOK
-    from cinecam.render.backend import FrameRenderer
+    from plouf.path.camera import CamState
+    from plouf.path.campath import DEFAULT_LOOK
+    from plouf.render.backend import FrameRenderer
 
     c = np.median(scene.sinks["star_pos"], axis=0) if len(scene.sinks["star_pos"]) else np.zeros(3)
     st = CamState(pos=c + [0, -30, 8], target=c, up=[0, 0, 1])
@@ -64,9 +64,9 @@ def test_frame_render(scene):
 def test_render_process_roundtrip():
     """The editor's render process: spawned from the package, answers a render request."""
     pytest.importorskip("shamrock")
-    from cinecam.path.camera import CamState
-    from cinecam.path.campath import DEFAULT_LOOK
-    from cinecam.render.backend import server_main
+    from plouf.path.camera import CamState
+    from plouf.path.campath import DEFAULT_LOOK
+    from plouf.render.backend import server_main
 
     ctx = mp.get_context("spawn")
     conn, child = ctx.Pipe()
@@ -92,7 +92,7 @@ def test_render_process_roundtrip():
 
 def test_lens_shift_of_the_gas_render_matches_project(scene):
     """A stereo eye's gas render (wider, cropped) is the image translated like project() moves points."""
-    from cinecam.path.camera import CamState
+    from plouf.path.camera import CamState
 
     st = CamState(pos=[0, -30, 8], target=[0, 0, 0], up=[0, 0, 1])
     a = scene.column(st, 160, 90)
@@ -105,8 +105,8 @@ def test_stereo_movie_render(tmp_path):
     import subprocess
     import sys
 
-    from cinecam.path.camera import CamState
-    from cinecam.path.campath import CameraPath, Keyframe
+    from plouf.path.camera import CamState
+    from plouf.path.campath import CameraPath, Keyframe
 
     p = CameraPath(keyframes=[Keyframe(0, CamState(pos=[0, -30, 8], target=[0, 0, 0], up=[0, 0, 1])),
                               Keyframe(1, CamState(pos=[5, -30, 8], target=[0, 0, 0], up=[0, 0, 1]))],
@@ -114,6 +114,6 @@ def test_stereo_movie_render(tmp_path):
     f = tmp_path / "p.json"
     p.save(f)
     out = tmp_path / "frames"
-    cmd = [sys.executable, "-m", "cinecam.render_movie", str(f), "--out", str(out), "--scale", "0.05", "--frames", "1:3", "--stereo"]
+    cmd = [sys.executable, "-m", "plouf.render_movie", str(f), "--out", str(out), "--scale", "0.05", "--frames", "1:3", "--stereo"]
     subprocess.run(cmd, check=True, capture_output=True, env=dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path)))
     assert sorted(os.listdir(out)) == [f"frame_{j:05d}.png" for j in (2, 3, 4, 5)]

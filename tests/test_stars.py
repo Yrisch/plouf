@@ -1,7 +1,7 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """Star layer: true colour photometry, PSF, stretch, dots, auto exposure (render/stars.py)."""
 
@@ -9,9 +9,9 @@ import numpy as np
 import pytest
 from conftest import sink_pos
 
-from cinecam.path.camera import CamState
-from cinecam.path.campath import CameraPath, Keyframe
-from cinecam.render.stars import StarLight, star_exposure
+from plouf.path.camera import CamState
+from plouf.path.campath import CameraPath, Keyframe
+from plouf.render.stars import StarLight, star_exposure
 
 SL = StarLight()
 LOOK = {"psf_scale": 1.0, "star_psf": True, "star_spikes": True}

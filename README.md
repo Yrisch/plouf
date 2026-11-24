@@ -1,11 +1,11 @@
-# cinecam — camera paths through Phantom simulations, rendered by shamrock
+# plouf — camera paths through Phantom simulations, rendered by shamrock
 
 ```bash
-./cinecam ../esc_00*                        # editor, dumps in time order (globs ok)
-./cinecam ../esc_00* --path orbit.json      # open / create a path file
-./cinecam render orbit.json --scale 0.5     # batch render (draft at half res)
-./cinecam render orbit.json --frames 0:150 --sycl 0:0 --mp4 movie.mp4
-./cinecam render orbit.json --stereo        # flat-screen stereo pair (even files left eye, odd right)
+./plouf ../esc_00*                      # editor, dumps in time order (globs ok)
+./plouf ../esc_00* --path orbit.json    # open / create a path file
+./plouf render orbit.json --scale 0.5   # batch render (draft at half res)
+./plouf render orbit.json --frames 0:150 --sycl 0:0 --mp4 movie.mp4
+./plouf render orbit.json --stereo      # flat-screen stereo pair (even files left eye, odd right)
 ```
 
 Working on the code (or letting an AI agent do it)? Read [`CLAUDE.md`](CLAUDE.md) first:
@@ -13,27 +13,27 @@ architecture, invariants of the path interpolation, how to extend and test.
 
 ## Installation
 
-cinecam is pure Python; nothing to compile besides shamrock itself.
+plouf is pure Python; nothing to compile besides shamrock itself.
 
 1. **Build shamrock with its python module** (see the shamrock documentation). The build
    directory must contain `pysham/` and the `libsham*.so` libraries. The launcher looks
-   for it in `../../build` (cinecam sitting in `<shamrock>/tmp/cinecam`); otherwise set
+   for it in `../../build` (plouf sitting in `<shamrock>/tmp/plouf`); otherwise set
    `SHAMROCK_BUILD`.
 2. **Create a python environment** with the dependencies. Use the same python version
    as the one shamrock was built against, or `import shamrock` will fail:
 
    ```bash
-   python3 -m venv ~/venvs/cinecam
-   ~/venvs/cinecam/bin/pip install numpy scipy matplotlib pillow PyQt6 pytest
+   python3 -m venv ~/venvs/plouf
+   ~/venvs/plouf/bin/pip install numpy scipy matplotlib pillow PyQt6 pytest
    ```
 
    `ffmpeg` on the `PATH` is only needed for `render --mp4`.
-3. **Tell the launcher which python to use.** It runs `$CINECAM_PYTHON`, or `python3`
+3. **Tell the launcher which python to use.** It runs `$PLOUF_PYTHON`, or `python3`
    from the `PATH` when it is not set (so an activated venv works):
 
    ```bash
    # once, in ~/.bashrc (or ~/.zshrc)
-   export CINECAM_PYTHON=~/venvs/cinecam/bin/python
+   export PLOUF_PYTHON=~/venvs/plouf/bin/python
    export SHAMROCK_BUILD=/path/to/shamrock/build   # only if not ../../build
    ```
 
@@ -41,14 +41,14 @@ cinecam is pure Python; nothing to compile besides shamrock itself.
 
    ```bash
    B=${SHAMROCK_BUILD:-../../build}
-   PYTHONPATH=$B/pysham LD_LIBRARY_PATH=$B ${CINECAM_PYTHON:-python3} \
+   PYTHONPATH=$B/pysham LD_LIBRARY_PATH=$B ${PLOUF_PYTHON:-python3} \
        -c "import shamrock, PyQt6, scipy, matplotlib, PIL; print('ok')"
    ```
 
-   then `./cinecam your_dumps_*`. Optionally link the launcher into your `PATH`
-   (`ln -s $PWD/cinecam ~/.local/bin/cinecam`); it resolves its own location.
+   then `./plouf your_dumps_*`. Optionally link the launcher into your `PATH`
+   (`ln -s $PWD/plouf ~/.local/bin/plouf`); it resolves its own location.
 
-Caches: sink trajectories go to `~/.cache/cinecam/` (`$XDG_CACHE_HOME`), editor settings
+Caches: sink trajectories go to `~/.cache/plouf/` (`$XDG_CACHE_HOME`), editor settings
 to the Qt settings of the user.
 
 ## Editor
@@ -61,7 +61,7 @@ to the Qt settings of the user.
 | **camera inspector** | exact numbers for the camera at the playhead + per-key look (Σ range, star exposure, extinction). |
 | **movie & look** | duration, fps, output resolution, preview resolution, colormap, layers, star PSF on/off (off: the proxy dots), spikes, bright star glow, auto exposure, time label size. |
 
-Started without dumps (`./cinecam`), the editor asks for them: select the dumps, or a
+Started without dumps (`./plouf`), the editor asks for them: select the dumps, or a
 camera path `.json`, which is opened with the dumps it lists.
 
 Workflow: scrub to a time, fly the camera in the viewfinder, press **K**.
@@ -105,11 +105,11 @@ replaced by the next ranked one, so the proxy does not flicker.
 ### Dump formats
 
 The fast readers (gas sample for the proxy, sinks for the trajectories) are pluggable:
-`src/cinecam/data/readers.py` defines `DumpReader` (`read_gas`, `read_sinks`) and the `READERS`
+`src/plouf/data/readers.py` defines `DumpReader` (`read_gas`, `read_sinks`) and the `READERS`
 registry. `phantom` is the only one so far and the default; the format is stored in the
 path file (`"format"`) and can be set with `--format`. Supporting another code (gadget,
 shamrock dumps, ...) means adding a reader there. The real renders still load the dumps
-through shamrock (`src/cinecam/render/backend.py`).
+through shamrock (`src/plouf/render/backend.py`).
 
 ## Following a star or a core
 
@@ -129,7 +129,7 @@ from one key's frame to the next one's, so following, switching from one sink to
 releasing are all smooth. Changing the dump of a following key moves it with its sink.
 
 Sink trajectories are read from the sink block of every dump in the background (a few
-seconds for 1000 dumps, cached in `~/.cache/cinecam/`). A sink is its index in the dump
+seconds for 1000 dumps, cached in `~/.cache/plouf/`). A sink is its index in the dump
 sink arrays, which Phantom keeps across dumps. Between two dumps the sinks follow a cubic
 Hermite curve built from their positions and velocities; stars and cores are also drawn
 there in the renders, so a followed sink stays exactly where the camera expects it.
@@ -241,7 +241,7 @@ faint pixels, logarithmic for bright ones and white at `I_WHITE` (`render/stars.
 
 ### Stereo (flat screen)
 
-`./cinecam render path.json --stereo [angle]`, or the *stereo pair* box of the render
+`./plouf render path.json --stereo [angle]`, or the *stereo pair* box of the render
 dialog, renders each frame of the path twice: path frame *i* becomes file `2i` (left eye)
 and `2i+1` (right eye), at the same size as a mono frame. `--frames` still counts path
 frames; `--skip-existing` skips the eyes already on disk; `--mp4` is not available in
@@ -267,24 +267,24 @@ On a large screen keep the angle moderate: gas far behind the target is up to ab
 ## Layout
 
 ```
-cinecam                 launcher (editor, `render`, `test`)
-examples/orbit.json     a 360° orbit path (open it with your dumps: ./cinecam dumps... --path examples/orbit.json)
-src/cinecam/
+plouf                   launcher (editor, `render`, `test`)
+examples/orbit.json     a 360° orbit path (open it with your dumps: ./plouf dumps... --path examples/orbit.json)
+src/plouf/
   constants.py          units, star / core threshold
   path/                 camera.py (camera maths, projection), campath.py (keys, interpolation, following, files)
   data/                 readers.py (fast dump readers), sinktracks.py (sink trajectories), proxycache.py (proxy samples)
   render/               compose.py (gas, cores, labels), stars.py (star layer), backend.py (shamrock scene, render process)
   gui/                  app.py (main window), worldview, viewfinder, timeline, inspectors, workers, keymaps, qtutil
-  render_movie.py       batch renderer (./cinecam render)
+  render_movie.py       batch renderer (./plouf render)
 tests/                  pytest suite, with a writer of small synthetic Phantom dumps
 ```
 
 ## Tests
 
 ```bash
-./cinecam test                                   # everything that needs neither shamrock nor a dump
-CINECAM_TEST_DUMP=../esc_00500 ./cinecam test    # + the shamrock tests on a real dump
-./cinecam test -m "not gui"                      # without the (offscreen) editor tests
+./plouf test                                 # everything that needs neither shamrock nor a dump
+PLOUF_TEST_DUMP=../esc_00500 ./plouf test    # + the shamrock tests on a real dump
+./plouf test -m "not gui"                    # without the (offscreen) editor tests
 ```
 
 The tests run on small synthetic Phantom dumps (`tests/phantom.py`): camera maths, the serial
@@ -295,7 +295,7 @@ the star photometry / PSF / stretch / auto exposure, compositing, and the editor
 
 ## License
 
-cinecam is licensed under the CeCILL Free Software License Agreement v2.1, like shamrock:
+plouf is licensed under the CeCILL Free Software License Agreement v2.1, like shamrock:
 see [LICENSE](LICENSE) (French version) or [LICENSE.en](LICENSE.en) (English version).
 
 SPDX-License-Identifier: CECILL-2.1

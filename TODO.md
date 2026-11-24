@@ -1,4 +1,4 @@
-# cinecam — to do
+# plouf — to do
 
 * **Documentation**: a proper user and developer documentation beyond the README (editor
   workflow, path file format, rendering pipeline, star photometry and PSF, auto exposure

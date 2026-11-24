@@ -1,15 +1,15 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """Gas colours, proxy splats, cores and labels (render/compose.py)."""
 
 import numpy as np
 import pytest
 
-from cinecam.path.camera import CamState, pixel_size
-from cinecam.render.compose import compose, core_radius, draw_label, gas_rgb, lut, splat_column
+from plouf.path.camera import CamState, pixel_size
+from plouf.render.compose import compose, core_radius, draw_label, gas_rgb, lut, splat_column
 
 LOOK = {"cmap": "inferno", "show_gas": True, "show_cores": True, "core_radius": None, "core_color": [1.0, 0.27, 0.0]}
 

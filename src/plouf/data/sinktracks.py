@@ -1,7 +1,7 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
 Sink trajectories through a series of dumps, for cameras that follow a sink.
@@ -37,7 +37,7 @@ def _cache_key(dumps, fmt):
 
 def cache_path(dumps, fmt=DEFAULT_FORMAT):
     base = os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
-    return os.path.join(base, "cinecam", f"sinks_{_cache_key(dumps, fmt)}.npz")
+    return os.path.join(base, "plouf", f"sinks_{_cache_key(dumps, fmt)}.npz")
 
 
 class SinkTracks:

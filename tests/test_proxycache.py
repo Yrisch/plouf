@@ -1,7 +1,7 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 import threading
 
@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 from conftest import NGAS
 
-from cinecam.data.proxycache import ProxyCache, particle_rank, proxy_sample
-from cinecam.data.readers import get_reader
+from plouf.data.proxycache import ProxyCache, particle_rank, proxy_sample
+from plouf.data.readers import get_reader
 
 N = 1000
 

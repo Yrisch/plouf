@@ -1,9 +1,9 @@
-# CLAUDE.md — working on cinecam
+# CLAUDE.md — working on plouf
 
 Guidance for AI coding agents (and humans) changing this code. User-facing docs are in
 `README.md`; this file covers architecture, invariants and how to test.
 
-cinecam builds camera paths through Phantom SPH dumps in a Qt editor and renders them
+plouf builds camera paths through Phantom SPH dumps in a Qt editor and renders them
 into movies, with shamrock (python module `shamrock`, from `<shamrock build>/pysham`)
 as the column density backend. Pure Python: numpy, scipy, matplotlib, Pillow, PyQt6,
 shamrock; pytest for the tests.
@@ -11,15 +11,15 @@ shamrock; pytest for the tests.
 ## Running
 
 ```bash
-./cinecam dumps...  [--path p.json] [--sycl 0:0] [--sample 400000] [--format phantom]
-                    [--proxy-cache 1024] [--keyboard qwerty|azerty]
-./cinecam render p.json [--scale 0.5] [--frames a:b] [--mp4 out.mp4] [--sycl 0:0]
-./cinecam test [pytest options]
+./plouf dumps...  [--path p.json] [--sycl 0:0] [--sample 400000] [--format phantom]
+                  [--proxy-cache 1024] [--keyboard qwerty|azerty]
+./plouf render p.json [--scale 0.5] [--frames a:b] [--mp4 out.mp4] [--sycl 0:0]
+./plouf test [pytest options]
 ```
 
 The launcher puts `src/` and `$SHAMROCK_BUILD/pysham` (default `../../build`) on
-`PYTHONPATH`, the build on `LD_LIBRARY_PATH`, and runs `$CINECAM_PYTHON` (default:
-`python3` on `PATH`) with `-m cinecam.gui.app`, `-m cinecam.render_movie` or
+`PYTHONPATH`, the build on `LD_LIBRARY_PATH`, and runs `$PLOUF_PYTHON` (default:
+`python3` on `PATH`) with `-m plouf.gui.app`, `-m plouf.render_movie` or
 `-m pytest`. Nothing is compiled here; shamrock must already be built (README,
 "Installation").
 
@@ -31,7 +31,7 @@ The launcher puts `src/` and `$SHAMROCK_BUILD/pysham` (default `../../build`) on
 | `path/camera.py` | `CamState`, camera maths (`basis`, orbit/turntable/look/level, `_keep_hint`), `project`, `unproject_delta`, `frustum_corners`, `stereo_eyes` | numpy |
 | `path/campath.py` | `SerialHermite`, `Smoothstep`, `Keyframe`, `CameraPath` (keys → state at t, following, `retime_segment`), `make_orbit`, `DEFAULT_LOOK` | path |
 | `data/readers.py` | fast partial dump readers: `DumpReader`, `PhantomReader`, `READERS`, `get_reader` | numpy |
-| `data/sinktracks.py` | `SinkTracks`: every sink in every dump, Hermite positions, `sinks_at(dump)`, npz cache in `~/.cache/cinecam/` | data, constants |
+| `data/sinktracks.py` | `SinkTracks`: every sink in every dump, Hermite positions, `sinks_at(dump)`, npz cache in `~/.cache/plouf/` | data, constants |
 | `data/proxycache.py` | `proxy_sample` (fixed-rank gas sample), `ProxyCache` (LRU + prefetch thread) | data, constants |
 | `render/compose.py` | gas colormap, proxy `splat_column`, cores, label, `compose`, `save_png` | path, numpy/scipy/matplotlib/PIL |
 | `render/stars.py` | `StarLight` (photometry, PSF, stretch, dots, auto exposure), `star_exposure` | path |
@@ -53,7 +53,7 @@ lazily), so they stay importable and testable without either.
 * **Worker threads**: `TracksBuilder` (QThread, sink tracks) and `ProxyCache`'s
   `threading.Thread`. Workers never touch widgets: they report through Qt signals
   (`ProxyBridge`) back to the GUI thread.
-* **Movie render** from the editor: a `QProcess` running `-m cinecam.render_movie`,
+* **Movie render** from the editor: a `QProcess` running `-m plouf.render_movie`,
   with `src/` added to its `PYTHONPATH`.
 * The instant views (proxy splat, world view) must stay cheap: they run on every mouse
   move and at ~15 fps while playing. Measure before adding per-frame work there.
@@ -130,9 +130,9 @@ lazily), so they stay importable and testable without either.
 ## Testing
 
 ```bash
-./cinecam test                                     # ~10 s, no shamrock needed
-CINECAM_TEST_DUMP=/path/to/dump ./cinecam test     # + shamrock tests (render process, reader vs shamrock)
-./cinecam test tests/test_interpolation.py -k append
+./plouf test                                   # ~10 s, no shamrock needed
+PLOUF_TEST_DUMP=/path/to/dump ./plouf test     # + shamrock tests (render process, reader vs shamrock)
+./plouf test tests/test_interpolation.py -k append
 ```
 
 * `tests/conftest.py` writes a small synthetic simulation (`sim` fixture): 5 Phantom

@@ -1,7 +1,7 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
 Background work of the editor: the shamrock render process, the sink tracks reader.
@@ -18,7 +18,7 @@ from ..render import backend
 
 
 class TracksBuilder(QtCore.QThread):
-    """Reads the sink block of every dump in the background (cached in ~/.cache/cinecam)."""
+    """Reads the sink block of every dump in the background (cached in ~/.cache/plouf)."""
 
     progress = pyqtSignal(int, int)
     done = pyqtSignal(object, object)  # dumps tuple, SinkTracks or exception

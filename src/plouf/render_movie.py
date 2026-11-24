@@ -1,12 +1,12 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
-Render all the frames of a cinecam camera path with shamrock.
+Render all the frames of a plouf camera path with shamrock.
 
-    ./cinecam render campath.json --out frames/ [--frames 0:300] [--scale 0.5] [--mp4 movie.mp4]
+    ./plouf render campath.json --out frames/ [--frames 0:300] [--scale 0.5] [--mp4 movie.mp4]
 
 Frames are written as frame_%05d.png. Use --frames to split a long movie between
 several jobs / GPUs (--sycl), and --skip-existing to resume an interrupted render.
@@ -31,7 +31,7 @@ from .render.stars import star_exposure
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="cinecam render", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="plouf render", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("path", help="camera path JSON written by the editor")
     ap.add_argument("--out", default=None, help="output directory (default: <path>_frames)")
     ap.add_argument("--frames", default=None, help="frame range a:b (python slice, b excluded)")

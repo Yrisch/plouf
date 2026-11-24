@@ -1,0 +1,6 @@
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
+# SPDX-License-Identifier: CECILL-2.1
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
+
+"""plouf: camera paths through SPH simulations, rendered with shamrock."""

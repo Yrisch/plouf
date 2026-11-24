@@ -1,13 +1,13 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
-cinecam editor (main window): build a keyframed 3D camera path through a Phantom
+plouf editor (main window): build a keyframed 3D camera path through a Phantom
 simulation and preview it with shamrock column density renders.
 
-    ./cinecam [dumps ...] [--path path.json] [--sycl 0:0]
+    ./plouf [dumps ...] [--path path.json] [--sycl 0:0]
 
 Layout
     left    world view: whole simulation, camera path, keyframe cameras (drag handles)
@@ -64,14 +64,14 @@ from .viewfinder import Viewfinder
 from .workers import Backend, ProxyBridge, TracksBuilder
 from .worldview import WorldView
 
-SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # holds the cinecam package
+SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # holds the plouf package
 
 
 class Editor(QtWidgets.QMainWindow):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.settings = QtCore.QSettings("cinecam", "cinecam")
+        self.settings = QtCore.QSettings("plouf", "plouf")
         self.keyboard = args.keyboard or self.settings.value("keyboard", "qwerty")
         if self.keyboard not in KEYMAPS:
             self.keyboard = "qwerty"
@@ -287,7 +287,7 @@ class Editor(QtWidgets.QMainWindow):
         self.timeline.update()
         name = os.path.basename(self.path_file) if self.path_file else "untitled"
         mod = "*" if self.history[self.hpos] != self.saved else ""
-        self.setWindowTitle(f"cinecam — {name}{mod}")
+        self.setWindowTitle(f"plouf — {name}{mod}")
 
     # ------------------------------------------------------------------ state
 
@@ -832,7 +832,7 @@ class Editor(QtWidgets.QMainWindow):
         paths = [f for f in files if f.lower().endswith(".json")]
         if paths:  # a camera path picked here (e.g. in the dialog shown at startup): open it, it lists its dumps
             if len(files) > 1:
-                QtWidgets.QMessageBox.warning(self, "cinecam", "Select either simulation dumps or one camera path (.json).")
+                QtWidgets.QMessageBox.warning(self, "plouf", "Select either simulation dumps or one camera path (.json).")
                 return
             self.open_path(paths[0])
             return
@@ -876,10 +876,10 @@ class Editor(QtWidgets.QMainWindow):
 
     def render_movie(self):
         if self.movie_proc is not None:
-            QtWidgets.QMessageBox.information(self, "cinecam", "A movie render is already running.")
+            QtWidgets.QMessageBox.information(self, "plouf", "A movie render is already running.")
             return
         if not self.path.keyframes:
-            QtWidgets.QMessageBox.warning(self, "cinecam", "Add at least one keyframe first.")
+            QtWidgets.QMessageBox.warning(self, "plouf", "Add at least one keyframe first.")
             return
         if not self.save_path():
             return
@@ -889,7 +889,7 @@ class Editor(QtWidgets.QMainWindow):
             return
         cmd = [
             "-m",
-            "cinecam.render_movie",
+            "plouf.render_movie",
             self.path_file,
             "--out",
             dlg.out.text(),
@@ -910,7 +910,7 @@ class Editor(QtWidgets.QMainWindow):
         self.movie_proc.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
         self.movie_proc.readyReadStandardOutput.connect(self._movie_output)
         self.movie_proc.finished.connect(self._movie_done)
-        env = QtCore.QProcessEnvironment.systemEnvironment()  # the batch renderer imports the cinecam package
+        env = QtCore.QProcessEnvironment.systemEnvironment()  # the batch renderer imports the plouf package
         env.insert("PYTHONPATH", os.pathsep.join(p for p in (SRC, env.value("PYTHONPATH")) if p))
         self.movie_proc.setProcessEnvironment(env)
         self.progress.setRange(0, dlg.last.value() + 1 - dlg.first.value())
@@ -946,7 +946,7 @@ class Editor(QtWidgets.QMainWindow):
         if self.history[self.hpos] != self.saved:
             r = QtWidgets.QMessageBox.question(
                 self,
-                "cinecam",
+                "plouf",
                 "Save the camera path before quitting?",
                 QtWidgets.QMessageBox.StandardButton.Save
                 | QtWidgets.QMessageBox.StandardButton.Discard
@@ -975,7 +975,7 @@ def expand_dumps(items):
 
 
 def main():
-    ap = argparse.ArgumentParser(prog="cinecam", description="cinecam: camera path editor for Phantom dumps rendered with shamrock")
+    ap = argparse.ArgumentParser(prog="plouf", description="plouf: camera path editor for Phantom dumps rendered with shamrock")
     ap.add_argument("dumps", nargs="*", help="Phantom dumps in time order (globs accepted, e.g. 'esc_00*')")
     ap.add_argument("--path", help="camera path JSON to open (created on save if missing)")
     ap.add_argument("--sycl", default="0:0", help="shamrock sycl config (default 0:0)")

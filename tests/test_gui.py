@@ -1,7 +1,7 @@
-# cinecam: camera paths through SPH simulations, rendered with shamrock
-# Copyright (c) 2026 the cinecam authors
+# plouf: camera paths through SPH simulations, rendered with shamrock
+# Copyright (c) 2026 the plouf authors
 # SPDX-License-Identifier: CECILL-2.1
-# cinecam is licensed under the CeCILL 2.1 License, see LICENSE for more information
+# plouf is licensed under the CeCILL 2.1 License, see LICENSE for more information
 
 """
 Editor tests, offscreen. The shamrock render process is replaced by a stub, so they need
@@ -65,7 +65,7 @@ def wait(app, cond, tmax=20.0):
 
 @pytest.fixture
 def editor(qapp, sim, monkeypatch):
-    from cinecam.gui import app as gui_app
+    from plouf.gui import app as gui_app
 
     monkeypatch.setattr(gui_app, "Backend", StubBackend)
     args = argparse.Namespace(dumps=sim.dumps, path=None, sycl="0:0", sample=1000, keyboard="qwerty", format=None,
@@ -146,7 +146,7 @@ def test_click_selects_a_sink(qapp, editor):
     st.target = sink_pos(2, st.dump)
     editor.live_changed()
     qapp.processEvents()
-    from cinecam.gui.qtutil import fit_rect
+    from plouf.gui.qtutil import fit_rect
 
     r = fit_rect(vf.width(), vf.height(), editor.aspect())
     c = QPointF(r.center())
@@ -239,7 +239,7 @@ def test_retime_segment_from_the_editor_and_by_shift_dragging_a_key(qapp, editor
 
 
 def test_render_dialog_stereo_option(qapp):
-    from cinecam.gui.inspectors import RenderDialog
+    from plouf.gui.inspectors import RenderDialog
 
     dlg = RenderDialog(None, "/tmp/out", 10)
     assert not dlg.angle.isEnabled() and dlg.mp4.isEnabled()
@@ -249,8 +249,8 @@ def test_render_dialog_stereo_option(qapp):
 
 def test_a_camera_path_picked_in_the_dumps_dialog_is_opened(qapp, editor, sim, tmp_path, monkeypatch):
     """The dialog shown at startup without dumps: picking a path file opens it, not as a dump."""
-    from cinecam.path.camera import CamState
-    from cinecam.path.campath import CameraPath, Keyframe
+    from plouf.path.camera import CamState
+    from plouf.path.campath import CameraPath, Keyframe
 
     p = CameraPath(keyframes=[Keyframe(0, CamState(pos=[0, -3, 1], target=[0, 0, 0], up=[0, 0, 1], dump=2))], dumps=sim.dumps[:3])
     f = str(tmp_path / "p.json")
